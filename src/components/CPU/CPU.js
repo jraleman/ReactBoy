@@ -1,4 +1,5 @@
 import React from 'react';
+import './styles.css';
 
 class CPU extends React.Component {
   constructor (props) {
@@ -8,7 +9,7 @@ class CPU extends React.Component {
   render () {
     return (
       <React.Fragment>
-        <p>{ "CPU" }</p>
+        <div id="cpu" style={{ marginLeft: 100, marginTop: 100 }} />
       </React.Fragment>
     );
   }
