@@ -1,0 +1,23 @@
+{
+  "files": {
+    "main.css": "/ReactBoy/static/css/main.f5780a61.chunk.css",
+    "main.js": "/ReactBoy/static/js/main.fe9f5928.chunk.js",
+    "main.js.map": "/ReactBoy/static/js/main.fe9f5928.chunk.js.map",
+    "runtime-main.js": "/ReactBoy/static/js/runtime-main.bd60ec90.js",
+    "runtime-main.js.map": "/ReactBoy/static/js/runtime-main.bd60ec90.js.map",
+    "static/js/2.2f88379d.chunk.js": "/ReactBoy/static/js/2.2f88379d.chunk.js",
+    "static/js/2.2f88379d.chunk.js.map": "/ReactBoy/static/js/2.2f88379d.chunk.js.map",
+    "static/js/3.1f07d3d8.chunk.js": "/ReactBoy/static/js/3.1f07d3d8.chunk.js",
+    "static/js/3.1f07d3d8.chunk.js.map": "/ReactBoy/static/js/3.1f07d3d8.chunk.js.map",
+    "index.html": "/ReactBoy/index.html",
+    "static/css/main.f5780a61.chunk.css.map": "/ReactBoy/static/css/main.f5780a61.chunk.css.map",
+    "static/js/2.2f88379d.chunk.js.LICENSE.txt": "/ReactBoy/static/js/2.2f88379d.chunk.js.LICENSE.txt",
+    "static/media/logo.6ce24c58.svg": "/ReactBoy/static/media/logo.6ce24c58.svg"
+  },
+  "entrypoints": [
+    "static/js/runtime-main.bd60ec90.js",
+    "static/js/2.2f88379d.chunk.js",
+    "static/css/main.f5780a61.chunk.css",
+    "static/js/main.fe9f5928.chunk.js"
+  ]
+}
