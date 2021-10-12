@@ -1,16 +1,16 @@
 import React from 'react';
-import { SCREEN_GAMEBOY_LOGO } from '../../../utils/constants';
-import { LogoImg } from './styles';
-import './AnimatedLogo.css';
+import { GAMEBOY_LOGO_ID } from '../../../utils/constants';
+import { LogoImg, LogoContainer, LogoText } from './styles';
 import logo from '../../../assets/logo.svg';
+import './AnimatedLogo.css';
 
 const AnimatedLogo = () => {
     const logoText = 'ReactBoy';
     return (
-        <div>
-            <div id={SCREEN_GAMEBOY_LOGO}>{logoText}</div>
+        <LogoContainer >
             <LogoImg src={logo} alt="logo" />
-        </div>
+            <LogoText id={GAMEBOY_LOGO_ID}>{logoText}</LogoText>
+        </LogoContainer>
     );
 };
 

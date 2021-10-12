@@ -3,9 +3,17 @@ import styled from 'styled-components';
 export const LogoImg = styled.img`
     height: 72px;
     position: relative;
-    right: -95px;
-    height: 20vmin;
+    height: 15vmin;
     pointer-events: none;
+`;
+
+export const LogoContainer = styled.div`
+`;
+
+// TODO: Remove `!important` once we implement styles into styled-components fully
+export const LogoText = styled.div`
+    text-align: left !important;
+    margin-left: 50px !important;
 `;
   
 // @media (prefers-reduced-motion: no-preference) {

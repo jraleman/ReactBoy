@@ -14,8 +14,8 @@
     overflow: hidden;
     white-space: nowrap;
     color: #3232fc;
-    background: -webkit-linear-gradient(0deg, #3232fc 40%, #85e367 40%, #85e367 45%, #ff52e8 45%, #ff52e8 50%, #ff0151 50%, #ff0151 55%, #f9e52e 55%, #f9e52e 60%, #e8e8e8 60%);
-    background-position: 130px;
+    background: -webkit-linear-gradient(0deg, #3232fc 20%, #85e367 30%, #85e367 35%, #ff52e8 35%, #ff52e8 50%, #ff0151 50%, #ff0151 55%, #f9e52e 55%, #f9e52e 60%, #e8e8e8 60%);
+    background-position: 150px;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     -webkit-animation: screen-gameboy-text 3s infinite linear;

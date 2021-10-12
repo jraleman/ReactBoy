@@ -1,7 +1,7 @@
 import React from 'react';
-import logo from '../../assets/logo.svg';
 import CPU from '../CPU';
 import Screen from '../Screen';
+import Body from '../Body';
 import './App.css';
 
 const App = () => {
@@ -11,6 +11,7 @@ const App = () => {
         <div className="App-container">
           <Screen />
           <CPU />
+          <Body />
         </div>
       </header>
     </div>

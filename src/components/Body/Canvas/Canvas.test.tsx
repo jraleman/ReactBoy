@@ -1,10 +1,10 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import Screen from '.';
-import { GAMEBOY_LOGO_ID } from '../../../utils/constants';
+import Canvas from '.';
+import { CANVAS_ID } from '../../../utils/constants';
 
 test('renders learn react link', () => {
-  render(<Screen />);
-  const linkElement = screen.getByTestId(GAMEBOY_LOGO_ID);
+  render(<Canvas />);
+  const linkElement = screen.getByTestId(CANVAS_ID);
   expect(linkElement).toBeInTheDocument();
 });
