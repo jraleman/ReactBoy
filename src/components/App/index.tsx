@@ -10,7 +10,6 @@ const App = () => {
       <header className="App-header">
         <div className="App-container">
           <Screen />
-          <img src={logo} className="App-logo" alt="logo" />
           <CPU />
         </div>
       </header>
