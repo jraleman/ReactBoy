@@ -1,5 +1,6 @@
 import React from 'react';
 import { SCREEN_GAMEBOY_LOGO } from '../../../utils/constants';
+import { LogoImg } from './styles';
 import './AnimatedLogo.css';
 import logo from '../../../assets/logo.svg';
 
@@ -8,7 +9,7 @@ const AnimatedLogo = () => {
     return (
         <div>
             <div id={SCREEN_GAMEBOY_LOGO}>{logoText}</div>
-            <img src={logo} className="logo-img" alt="logo" />
+            <LogoImg src={logo} alt="logo" />
         </div>
     );
 };
