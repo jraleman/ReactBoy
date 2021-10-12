@@ -1,0 +1,6 @@
+#screen {
+    position: absolute;
+    height: 375px;
+    width: 350px;
+    background-color: darkgray;
+}
