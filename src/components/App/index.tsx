@@ -2,20 +2,18 @@ import React from 'react';
 import CPU from '../CPU';
 import Screen from '../Screen';
 import Body from '../Body';
-import './App.css';
+import { Container, Title } from './styles';
 
 const App = () => {
-  return (
-    <div className="App">
-      <header className="App-header">
-        <div className="App-container">
-          <Screen />
-          <CPU />
-          <Body />
-        </div>
-      </header>
-    </div>
-  );
+    const title = 'ReactBoy'
+    return (
+        <Container>
+            <Title>{title}</Title>
+            <Screen />
+            <CPU />
+            <Body />
+        </Container>
+    );
 };
 
 export default App;

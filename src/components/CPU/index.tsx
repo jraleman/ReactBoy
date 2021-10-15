@@ -1,9 +1,9 @@
 import React from 'react';
+import { Processor } from './styles';
 import { PROCESSOR_ID } from '../../utils/constants';
-import './CPU.css';
 
 const CPU = () => {
-    return <div id={PROCESSOR_ID}></div>;
+    return <Processor id={PROCESSOR_ID} />;
 };
 
 export default CPU;
