@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Read a byte from absolute location into A (LD A, addr)
 const LDAmm = (mmu) => {
     // Get address from instr

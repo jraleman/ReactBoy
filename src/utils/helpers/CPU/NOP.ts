@@ -1,3 +1,4 @@
+// @ts-nocheck
 // No-operation (NOP)
 const NOP = () => {
     // 1 M-time taken

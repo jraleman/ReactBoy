@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Compare B to A, setting flags (CP A, B)
 const CPr_b = () => {
     // Temp copy of A

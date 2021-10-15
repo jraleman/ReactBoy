@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Add E to A, leaving result in A (ADD A, E)
 const ADDr_e = () => {
     // Perform addition

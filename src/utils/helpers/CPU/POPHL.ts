@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Pop registers H and L off the stack (POP HL)
 const POPHL = (mmu) => {
     // Read L

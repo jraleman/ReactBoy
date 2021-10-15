@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Push registers B and C to the stack (PUSH BC)
 const PUSHBC = (mmu) => {
     // Drop through the stack
