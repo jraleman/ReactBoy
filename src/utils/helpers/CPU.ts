@@ -1,3 +1,7 @@
+// Instruction simulations
+
+// ------------------------------------------------------------------------
+
 // Add E to A, leaving result in A (ADD A, E)
 export const ADDr_e = () => {
     // Perform addition
@@ -43,4 +47,48 @@ export const CPr_b = () => {
 export const NOP = () => {
     // 1 M-time taken
     this._r.m = 1; this._r.t = 4;                
+};
+
+// ------------------------------------------------------------------------
+
+// Memory-handling instructions
+
+// Push registers B and C to the stack (PUSH BC)
+export const PUSHBC = (mmu) => {
+    // Drop through the stack
+    this._r.sp -= 1;
+    // Write B
+    mmu.wb(this._r.sp, this._r.b);
+    // Drop through the stack
+    this._r.sp -= 1;
+    // Write C
+    mmu.wb(this._r.sp, this._r.c);
+    // 3 M-times taken
+    this._r.m = 3; this._r.t = 12;
+};
+
+// Pop registers H and L off the stack (POP HL)
+export const POPHL = (mmu) => {
+    // Read L
+    this._r.l = mmu.rb(this._r.sp);
+    // Move back up the stack
+    this._r.sp += 1;
+    // Read H
+    this._r.h = mmu.rb(this._r.sp);
+    // Move back up the stack
+    this._r.sp += 1;
+    // 3 M-times taken
+    this._r.m = 3; this._r.t = 12;
+};
+
+// Read a byte from absolute location into A (LD A, addr)
+export const LDAmm = (mmu) => {
+    // Get address from instr
+    const addr = mmu.rw(this._r.pc);
+    // Advance PC
+    this._r.pc += 2;
+    // Read from address
+    this._r.a = mmu.rb(addr);
+    // 4 M-times taken
+    this._r.m = 4; this._r.t = 16;
 };

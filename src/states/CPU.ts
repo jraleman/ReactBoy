@@ -2,6 +2,9 @@ import {
     ADDr_e,
     CPr_b,
     NOP,
+    PUSHBC,
+    POPHL,
+    LDAmm,
 } from "../utils/helpers/CPU";
 
 // TODO: Move to /states/CPUInitialState?
@@ -33,6 +36,9 @@ const z80 = {
     ADDr_e,
     CPr_b,
     NOP,
+    PUSHBC,
+    POPHL,
+    LDAmm,
 };
 
 const CPU = { ...z80 };
