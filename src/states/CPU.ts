@@ -2,7 +2,7 @@ import {
     ADDr_e,
     CPr_b,
     NOP,
-} from "../utils/helpers/z80";
+} from "../utils/helpers/CPU";
 
 // TODO: Move to /states/CPUInitialState?
 const z80 = {
@@ -35,4 +35,6 @@ const z80 = {
     NOP,
 };
 
-export default z80;
+const CPU = { ...z80 };
+
+export default CPU;
