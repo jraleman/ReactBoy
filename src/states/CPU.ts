@@ -1,13 +1,11 @@
-import {
-    ADDr_e,
-    CPr_b,
-    NOP,
-    PUSHBC,
-    POPHL,
-    LDAmm,
-} from "../utils/helpers/CPU";
+import ADDr_e from '../utils/helpers/CPU/ADDr_e';
+import CPr_b from '../utils/helpers/CPU/CPr_b';
+import NOP from '../utils/helpers/CPU/NOP';
+import PUSHBC from '../utils/helpers/CPU/PUSHBC';
+import POPHL from '../utils/helpers/CPU/POPHL';
+import LDAmm from '../utils/helpers/CPU/LDAmm';
 
-// TODO: Move to /states/CPUInitialState?
+// TODO: Convert to context api
 const z80 = {
     // Time clock
     _clock: {
@@ -33,9 +31,11 @@ const z80 = {
         m: 0,
         t: 0,     
     },
+    // Instruction simulations
     ADDr_e,
     CPr_b,
     NOP,
+    // Memory-handling instructions
     PUSHBC,
     POPHL,
     LDAmm,
