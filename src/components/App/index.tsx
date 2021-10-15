@@ -3,9 +3,14 @@ import CPU from '../CPU';
 import Screen from '../Screen';
 import Body from '../Body';
 import { Container, Title } from './styles';
+import useGameboy from '../../utils/hooks/useGameboy';
 
 const App = () => {
-    const title = 'ReactBoy'
+    const { isInit } = useGameboy();
+    const title = 'ReactBoy';
+
+    console.log({ isInit });
+
     return (
         <Container>
             <Title>{title}</Title>
