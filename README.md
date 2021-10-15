@@ -1,4 +1,4 @@
-# Getting Started with Create React App
+# Reactboy
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
@@ -16,31 +16,139 @@ You will also see any lint errors in the console.
 
 ### `yarn test`
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Launches the test runner in the interactive watch mode.
 
 ### `yarn build`
 
 Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+It correctly bundles React in production mode and optimizes the build for the best performance.\
+The build is minified and the filenames include the hashes.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Project
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+### Components
 
-### `yarn eject`
+Based on http://www.bchanx.com/animated-gameboy-in-css:
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+```html
+<div id="gameboy" class="green" style="opacity: 1;">
+    <div id="canvas"></div>
+    <div id="border"></div>
+    <div id="border-top"></div>
+    <div id="border-left"></div>
+    <div id="border-bottom"></div>
+    <div id="border-right"></div>
+    <div id="screw-small-right" class="screw small"></div>
+    <div id="screw-small-left" class="screw small"></div>
+    <div id="screw-large-right" class="screw large"></div>
+    <div id="screw-large-left" class="screw large"></div>
+    <div id="backboard"></div>
+    <div id="motherboard"></div>
+    <div id="motherboard-capacitors" class="capacitors"></div>
+    <div id="chip-short" class="chip"></div>
+    <div id="chip-diagonal" class="chip"></div>
+    <div id="chip-tall" class="chip"></div>
+    <div id="chip-capacitors" class="capacitors"></div>
+    <div id="contrast-knob"></div>
+    <div id="link-port"></div>
+    <div id="circuit-bottom" class="circuit"></div>
+    <div id="circuit-top" class="circuit"></div>
+    <div id="transistors"></div>
+    <div id="processor"></div>
+    <div id="component"></div>
+    <div id="controller"></div>
+    <div id="speaker"></div>
+    <div id="whitescreen"></div>
+    <div id="glass"></div>
+    <div id="glass-gameboy-text">GAME BOY</div>
+    <div id="glass-color-text">C</div>
+    <div id="screen"></div>
+    <div id="screen-gameboy-text">GAME BOY</div>
+    <div id="screen-nintendo-text">Nintendo</div>
+    <div id="joystick-pad"></div>
+    <div id="joystick">.</div>
+    <div id="control"></div>
+    <div id="control-b" class="control-button">B</div>
+    <div id="control-a" class="control-button">A</div>
+    <div id="start-select-box"></div>
+    <div id="start-select-button"></div>
+    <div id="cover-vertical"></div>
+    <div id="cover-horizontal"></div>
+    <div id="gloss"></div>
+    <div id="speaker-holes"></div>
+    <div id="power"></div>
+</div>
+```
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+...let's divide our project into the following components:
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+```
+- Canvas
+- Borders
+    - Top
+    - Left
+    - Bottom
+    - Right
+- Screws
+    - SmRight
+    - SmLeft
+    - LgRight
+    - LgLeft 
+- Backboard
+- Motherboard
+    - Capacitors
+- Chips
+    - Short
+    - Diagonal
+    - Tall
+    - Capacitors
+- ContrastKnob
+- LinkPort
+- Circuit
+    - Bottom
+    - Top
+- Transistors
+- Processor/CPU
+- Component (???)
+- Controller
+- Speaker
+- Display
+    - WhiteScreen
+    - Glass
+    - Logo
+- DPad
+- AButton
+- BButton
+- StartButton
+- SelectButton
+- Cover
+    - Horizonal
+    - Vertical
+    - Gloss
+    - SpeakerHoles
+    - Power
+```
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+*TODO: refactor components to reduce number
 
-## Learn More
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## Assets
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+- [Animated Gameboy in CSS - Blog](http://www.bchanx.com/animated-gameboy-in-css-blog)
+
+## Tools
+
+- [Rednex Game Boy Development System](https://github.com/bentely/rgbds)
+- [BGB Emulator/Debugger](http://bgb.bircd.org)
+- [Everdrive GB](https://krikzz.com)
+
+## Sauce
+
+- [How Emulators Work: A Presentation](http://imrannazar.com/How-Emulators-Work:-a-presentation)
+- [Decoding Z80 Opcodes](http://z80.info/decoding.htm)
+- [RubyConf AU 2017 - Writing a Gameboy emulator in Ruby, by Colby Swandale](https://www.youtube.com/watch?v=WbO2FEpNPvQ)
+- [Opcode Map for the Gameboy-Z80](http://imrannazar.com/GameBoy-Z80-Opcode-Map)
+- [Gameboy Emulation: The CPU](http://imrannazar.com/GameBoy-Emulation-in-JavaScript:-The-CPU)
+- [Game Boy Emulator Dev - Writing disassembler](https://www.youtube.com/watch?v=eQXUJOkw0s0)
+- [Game Boy Emulator Dev - Implementing interrupts](https://www.youtube.com/watch?v=bkiB568FfXg)
+- [The Ultimate Game Boy Talk (33c3)](https://www.youtube.com/watch?v=HyzD8pNlpwI)
