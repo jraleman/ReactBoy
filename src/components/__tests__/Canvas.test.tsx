@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import Canvas from '.';
-import { CANVAS_ID } from '../../../utils/constants';
+import Canvas from '../Body/Canvas';
+import { CANVAS_ID } from '../../utils/constants';
 
 test('renders learn react link', () => {
   render(<Canvas />);
