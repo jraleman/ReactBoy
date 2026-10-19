@@ -1,154 +1,93 @@
-# Reactboy
+# ReactBoy
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A Game Boy (DMG) emulator for the browser. The emulator core is plain TypeScript with no
+DOM or React dependencies. It runs in a Web Worker, and React draws the handheld around it.
 
-## Available Scripts
+**Play:** <https://jraleman.com/ReactBoy/>. Load your own `.gb` ROM. Files never leave your
+device.
 
-In the project directory, you can run:
+## Status
 
-### `yarn start`
+| Area                                              | State                                                    |
+| ------------------------------------------------- | -------------------------------------------------------- |
+| CPU (SM83), interrupts, HALT bug, timers, OAM DMA | Passes Blargg `cpu_instrs`, `instr_timing`, `mem_timing` |
+| PPU (scanline renderer, window, sprites, STAT)    | Passes `dmg-acid2`                                       |
+| Cartridges                                        | ROM only, MBC1, MBC2, MBC3 (with RTC), MBC5              |
+| Input                                             | Keyboard, multitouch on-screen buttons, gamepads         |
+| Battery saves, save states                        | Not yet (milestone 6)                                    |
+| Sound                                             | Registers only, silent (milestone 7)                     |
+| Debugger, PWA                                     | Not yet (milestone 8)                                    |
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+See [the design document](reactboy-design-doc.md) for the full roadmap.
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+## Getting started
 
-### `yarn test`
+Requires Node 22+ and pnpm (`corepack enable`).
 
-Launches the test runner in the interactive watch mode.
-
-### `yarn build`
-
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.\
-The build is minified and the filenames include the hashes.
-
-## Project
-
-### Components
-
-Based on http://www.bchanx.com/animated-gameboy-in-css:
-
-```html
-<div id="gameboy" class="green" style="opacity: 1;">
-    <div id="canvas"></div>
-    <div id="border"></div>
-    <div id="border-top"></div>
-    <div id="border-left"></div>
-    <div id="border-bottom"></div>
-    <div id="border-right"></div>
-    <div id="screw-small-right" class="screw small"></div>
-    <div id="screw-small-left" class="screw small"></div>
-    <div id="screw-large-right" class="screw large"></div>
-    <div id="screw-large-left" class="screw large"></div>
-    <div id="backboard"></div>
-    <div id="motherboard"></div>
-    <div id="motherboard-capacitors" class="capacitors"></div>
-    <div id="chip-short" class="chip"></div>
-    <div id="chip-diagonal" class="chip"></div>
-    <div id="chip-tall" class="chip"></div>
-    <div id="chip-capacitors" class="capacitors"></div>
-    <div id="contrast-knob"></div>
-    <div id="link-port"></div>
-    <div id="circuit-bottom" class="circuit"></div>
-    <div id="circuit-top" class="circuit"></div>
-    <div id="transistors"></div>
-    <div id="processor"></div>
-    <div id="component"></div>
-    <div id="controller"></div>
-    <div id="speaker"></div>
-    <div id="whitescreen"></div>
-    <div id="glass"></div>
-    <div id="glass-gameboy-text">GAME BOY</div>
-    <div id="glass-color-text">C</div>
-    <div id="screen"></div>
-    <div id="screen-gameboy-text">GAME BOY</div>
-    <div id="screen-nintendo-text">Nintendo</div>
-    <div id="joystick-pad"></div>
-    <div id="joystick">.</div>
-    <div id="control"></div>
-    <div id="control-b" class="control-button">B</div>
-    <div id="control-a" class="control-button">A</div>
-    <div id="start-select-box"></div>
-    <div id="start-select-button"></div>
-    <div id="cover-vertical"></div>
-    <div id="cover-horizontal"></div>
-    <div id="gloss"></div>
-    <div id="speaker-holes"></div>
-    <div id="power"></div>
-</div>
+```sh
+pnpm install
+pnpm dev          # http://localhost:5173/ReactBoy/
 ```
 
-...let's divide our project into the following components:
+| Script                               | What it does                                                |
+| ------------------------------------ | ----------------------------------------------------------- |
+| `pnpm dev`                           | Start the web app with hot reload                           |
+| `pnpm build`                         | Type-check and build the site into `apps/web/dist`          |
+| `pnpm test`                          | Unit tests for every package, plus the ROM suite if present |
+| `pnpm fetch-roms`                    | Download the open test ROMs into `roms/test` (gitignored)   |
+| `pnpm lint`                          | ESLint                                                      |
+| `pnpm typecheck`                     | `tsc` for every package                                     |
+| `pnpm --filter @reactboy/core bench` | Frame-time benchmark against the 8 ms budget                |
+
+## Layout
 
 ```
-- Canvas
-- Borders
-    - Top
-    - Left
-    - Bottom
-    - Right
-- Screws
-    - SmRight
-    - SmLeft
-    - LgRight
-    - LgLeft 
-- Backboard
-- Motherboard
-    - Capacitors
-- Chips
-    - Short
-    - Diagonal
-    - Tall
-    - Capacitors
-- ContrastKnob
-- LinkPort
-- Circuit
-    - Bottom
-    - Top
-- Transistors
-- Processor/CPU
-- Component (???)
-- Controller
-- Speaker
-- Display
-    - WhiteScreen
-    - Glass
-    - Logo
-- DPad
-- AButton
-- BButton
-- StartButton
-- SelectButton
-- Cover
-    - Horizonal
-    - Vertical
-    - Gloss
-    - SpeakerHoles
-    - Power
+packages/core   @reactboy/core — CPU, MMU, cartridge mappers, PPU, timer, joypad, serial
+apps/web        @reactboy/web — React UI, worker host, input, canvas
+scripts         fetch-test-roms.mjs
 ```
 
-*TODO: refactor components to reduce number
+The core advances the whole machine one M-cycle at a time. Every CPU memory access ticks
+the timer, PPU, DMA and serial port, so instruction timing comes from the access pattern
+instead of a cycle table. The same opcode tables drive both execution and the disassembler.
 
+The web app runs the core in a worker (or inline if workers are unavailable).
+`requestAnimationFrame` paces it at the DMG's 59.73 Hz, independent of the display's
+refresh rate. Each frame comes back as a transferable buffer and is drawn to a 160×144
+canvas. React only re-renders on low-frequency changes (status, cartridge, held buttons),
+via `useSyncExternalStore`. The LCD is scaled by a whole number of device pixels whenever
+that costs little screen space, so pixels stay crisp.
 
-## Assets
+## Testing
 
-- [Animated Gameboy in CSS - Blog](http://www.bchanx.com/animated-gameboy-in-css-blog)
+`pnpm fetch-roms && pnpm test` runs, headlessly in Node:
 
-## Tools
+- Blargg's `cpu_instrs` (all 11), `instr_timing` and `mem_timing`, which report over the
+  serial port
+- `dmg-acid2`, compared pixel for pixel with its reference image
+- unit tests for the CPU, timer, PPU timing, joypad, mappers and disassembler
 
-- [Rednex Game Boy Development System](https://github.com/bentely/rgbds)
-- [BGB Emulator/Debugger](http://bgb.bircd.org)
-- [Everdrive GB](https://krikzz.com)
+CI runs lint, formatting, type checks, all tests and the build on every push and pull
+request, then deploys `master` to GitHub Pages.
 
-## Sauce
+## Legal
 
-- [How Emulators Work: A Presentation](http://imrannazar.com/How-Emulators-Work:-a-presentation)
-- [Decoding Z80 Opcodes](http://z80.info/decoding.htm)
-- [RubyConf AU 2017 - Writing a Gameboy emulator in Ruby, by Colby Swandale](https://www.youtube.com/watch?v=WbO2FEpNPvQ)
-- [Opcode Map for the Gameboy-Z80](http://imrannazar.com/GameBoy-Z80-Opcode-Map)
-- [Gameboy Emulation: The CPU](http://imrannazar.com/GameBoy-Emulation-in-JavaScript:-The-CPU)
-- [Game Boy Emulator Dev - Writing disassembler](https://www.youtube.com/watch?v=eQXUJOkw0s0)
-- [Game Boy Emulator Dev - Implementing interrupts](https://www.youtube.com/watch?v=bkiB568FfXg)
+ReactBoy ships no commercial ROMs and no boot ROM; the emulator starts from the documented
+post-boot state. Test ROMs are downloaded from their authors' repositories on demand.
+Game Boy is a trademark of Nintendo; this project is not affiliated with Nintendo.
+
+## References
+
+- [Pan Docs](https://gbdev.io/pandocs/), the primary hardware reference
+- [gbdev opcode table](https://gbdev.io/gb-opcodes/optables/)
+- [Blargg's test ROMs](https://github.com/retrio/gb-test-roms),
+  [dmg-acid2](https://github.com/mattcurrie/dmg-acid2),
+  [Mooneye Test Suite](https://github.com/Gekkio/mooneye-test-suite)
 - [The Ultimate Game Boy Talk (33c3)](https://www.youtube.com/watch?v=HyzD8pNlpwI)
+- [Imran Nazar: GameBoy Emulation in JavaScript](http://imrannazar.com/GameBoy-Emulation-in-JavaScript:-The-CPU)
+- [Game Boy Emulator Dev: writing a disassembler](https://www.youtube.com/watch?v=eQXUJOkw0s0)
+  and [implementing interrupts](https://www.youtube.com/watch?v=bkiB568FfXg)
+- [RubyConf AU 2017: Writing a Game Boy emulator in Ruby](https://www.youtube.com/watch?v=WbO2FEpNPvQ)
+- Tools: [RGBDS](https://github.com/gbdev/rgbds), [BGB](https://bgb.bircd.org)
+- The original shell was inspired by
+  [Animated Gameboy in CSS](http://www.bchanx.com/animated-gameboy-in-css-blog)
