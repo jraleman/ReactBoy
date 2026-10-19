@@ -1,5 +1,6 @@
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from '../constants';
 import { Interrupt, type Interrupts } from '../interrupts';
+import type { StateReader, StateWriter, Stateful } from '../state';
 import { PALETTES, toAbgr, type Palette } from './palette';
 
 export const PpuMode = {
@@ -23,7 +24,7 @@ const MAX_SPRITES_PER_LINE = 10;
  * LY/LYC and STAT interrupts are dot-accurate to the M-cycle; mid-scanline register writes
  * are not reflected (a pixel FIFO is a later stretch goal).
  */
-export class Ppu {
+export class Ppu implements Stateful {
   /** 8 KiB VRAM. A CGB would add a second bank. */
   readonly vram = new Uint8Array(0x2000);
   readonly oam = new Uint8Array(0xa0);
@@ -53,8 +54,13 @@ export class Ppu {
   /** Internal window line counter: advances only on lines where the window was drawn. */
   private windowLine = 0;
 
-  private readonly back = new Uint8ClampedArray(this.framebuffer.length);
-  private readonly backPixels = new Uint32Array(this.back.buffer);
+  private readonly framePixels = new Uint32Array(this.framebuffer.buffer);
+  /**
+   * Shade (0-3) of each pixel in the frame being drawn and in the last completed one. Colors
+   * are applied when a frame is presented, so a palette change can recolor it in place.
+   */
+  private readonly backShades = new Uint8Array(SCREEN_WIDTH * SCREEN_HEIGHT);
+  private readonly frontShades = new Uint8Array(SCREEN_WIDTH * SCREEN_HEIGHT);
   private readonly colors = new Uint32Array(4);
   private readonly bgIndex = new Uint8Array(SCREEN_WIDTH);
   private readonly objColor = new Uint8Array(SCREEN_WIDTH);
@@ -65,8 +71,10 @@ export class Ppu {
     this.setPalette(PALETTES.classic);
   }
 
+  /** Also recolors the last completed frame. */
   setPalette(palette: Palette): void {
     palette.forEach((rgb, i) => (this.colors[i] = toAbgr(rgb)));
+    this.colorFrame();
   }
 
   get lcdOn(): boolean {
@@ -131,7 +139,7 @@ export class Ppu {
       this.dot = 0;
       this.mode = PpuMode.HBlank;
       this.statLine = false;
-      this.backPixels.fill(this.colors[0]!);
+      this.backShades.fill(0);
       this.presentFrame();
     } else if (!wasOn && this.lcdOn) {
       // The first line after power-on skips OAM scan: it starts in mode 0.
@@ -166,9 +174,64 @@ export class Ppu {
     this.statLine = line;
   }
 
+  writeState(w: StateWriter): void {
+    w.bytes(this.vram);
+    w.bytes(this.oam);
+    w.bytes(this.backShades);
+    w.bytes(this.frontShades);
+    w.u8(this.lcdc);
+    w.u8(this.scy);
+    w.u8(this.scx);
+    w.u8(this.ly);
+    w.u8(this.lyc);
+    w.u8(this.bgp);
+    w.u8(this.obp0);
+    w.u8(this.obp1);
+    w.u8(this.wy);
+    w.u8(this.wx);
+    w.u8(this.statSources);
+    w.u8(this.mode);
+    w.u16(this.dot);
+    w.bool(this.statLine);
+    w.bool(this.windowTriggered);
+    w.u8(this.windowLine);
+    w.u32(this.frameCount);
+  }
+
+  readState(r: StateReader): void {
+    r.bytes(this.vram);
+    r.bytes(this.oam);
+    r.bytes(this.backShades);
+    r.bytes(this.frontShades);
+    this.lcdc = r.u8();
+    this.scy = r.u8();
+    this.scx = r.u8();
+    this.ly = r.u8();
+    this.lyc = r.u8();
+    this.bgp = r.u8();
+    this.obp0 = r.u8();
+    this.obp1 = r.u8();
+    this.wy = r.u8();
+    this.wx = r.u8();
+    this.statSources = r.u8() & 0x78;
+    this.mode = (r.u8() & 3) as PpuModeId;
+    this.dot = r.u16();
+    this.statLine = r.bool();
+    this.windowTriggered = r.bool();
+    this.windowLine = r.u8();
+    this.frameCount = r.u32();
+    this.colorFrame();
+  }
+
   private presentFrame(): void {
-    this.framebuffer.set(this.back);
+    this.frontShades.set(this.backShades);
+    this.colorFrame();
     this.frameCount++;
+  }
+
+  private colorFrame(): void {
+    const { framePixels, frontShades, colors } = this;
+    for (let i = 0; i < frontShades.length; i++) framePixels[i] = colors[frontShades[i]!]!;
   }
 
   private renderLine(): void {
@@ -196,8 +259,7 @@ export class Ppu {
     this.objColor.fill(0);
     if (lcdc & 0x02) this.renderSprites();
 
-    const pixels = this.backPixels;
-    const colors = this.colors;
+    const shades = this.backShades;
     const row = ly * SCREEN_WIDTH;
     const bgp = this.bgp;
     for (let x = 0; x < SCREEN_WIDTH; x++) {
@@ -212,7 +274,7 @@ export class Ppu {
           shade = (obp >> (obj * 2)) & 3;
         }
       }
-      pixels[row + x] = colors[shade]!;
+      shades[row + x] = shade;
     }
   }
 

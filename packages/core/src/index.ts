@@ -1,4 +1,5 @@
-export { GameBoy, type GameBoyOptions } from './gameboy';
+export { GameBoy, STATE_VERSION, type GameBoyOptions } from './gameboy';
+export { SaveStateError } from './state';
 export { Button, type ButtonId } from './joypad';
 export { Interrupt } from './interrupts';
 export {

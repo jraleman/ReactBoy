@@ -5,6 +5,7 @@ import type { Interrupts } from '../interrupts';
 import type { Joypad } from '../joypad';
 import type { Ppu } from '../ppu/ppu';
 import type { Serial } from '../serial';
+import type { StateReader, StateWriter, Stateful } from '../state';
 import type { Timer } from '../timer';
 import { IO } from './memory-map';
 
@@ -20,10 +21,12 @@ export interface MmuDevices {
 }
 
 /** Routes the 16-bit address space to cartridge, RAM and hardware registers. */
-export class Mmu {
+export class Mmu implements Stateful {
   /** 8 x 4 KiB banks so CGB banking can slot in; a DMG only uses banks 0 and 1. */
   readonly wram = new Uint8Array(0x8000);
   readonly hram = new Uint8Array(0x7f);
+  /** Set by any write to cartridge RAM; cleared once battery RAM has been saved. */
+  cartRamDirty = false;
   private wramBank = 1;
   private dma!: OamDma;
 
@@ -53,14 +56,28 @@ export class Mmu {
     if (addr < 0x8000) d.mbc.writeRom(addr, value);
     else if (addr < 0xa000) {
       if (d.ppu.vramAccessible()) d.ppu.vram[addr - 0x8000] = value;
-    } else if (addr < 0xc000) d.mbc.writeRam(addr, value);
-    else if (addr < 0xfe00) this.wram[this.wramOffset(addr)] = value;
+    } else if (addr < 0xc000) {
+      d.mbc.writeRam(addr, value);
+      this.cartRamDirty = true;
+    } else if (addr < 0xfe00) this.wram[this.wramOffset(addr)] = value;
     else if (addr < 0xfea0) {
       if (d.ppu.oamAccessible() && !this.dma.active) d.ppu.oam[addr - 0xfe00] = value;
     } else if (addr < 0xff00) {
       // Unusable region: writes are ignored.
     } else if (addr >= 0xff80 && addr < 0xffff) this.hram[addr - 0xff80] = value;
     else this.writeIo(addr, value);
+  }
+
+  writeState(w: StateWriter): void {
+    w.bytes(this.wram);
+    w.bytes(this.hram);
+    w.u8(this.wramBank);
+  }
+
+  readState(r: StateReader): void {
+    r.bytes(this.wram);
+    r.bytes(this.hram);
+    this.wramBank = r.u8();
   }
 
   /** Echo RAM (0xE000-0xFDFF) mirrors 0xC000-0xDDFF. */

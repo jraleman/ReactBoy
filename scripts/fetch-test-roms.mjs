@@ -27,6 +27,20 @@ const blargg = [
   'mem_timing/individual/01-read_timing.gb',
   'mem_timing/individual/02-write_timing.gb',
   'mem_timing/individual/03-modify_timing.gb',
+  ...[
+    '01-registers',
+    '02-len ctr',
+    '03-trigger',
+    '04-sweep',
+    '05-sweep details',
+    '06-overflow on trigger',
+    '07-len sweep period sync',
+    '08-len ctr during power',
+    '09-wave read while on',
+    '10-wave trigger while on',
+    '11-regs after power',
+    '12-wave write while on',
+  ].map((name) => `dmg_sound/rom_singles/${name}.gb`),
 ];
 
 const files = [

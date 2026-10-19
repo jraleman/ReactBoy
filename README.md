@@ -14,8 +14,8 @@ device.
 | PPU (scanline renderer, window, sprites, STAT)    | Passes `dmg-acid2`                                       |
 | Cartridges                                        | ROM only, MBC1, MBC2, MBC3 (with RTC), MBC5              |
 | Input                                             | Keyboard, multitouch on-screen buttons, gamepads         |
-| Battery saves, save states                        | Not yet (milestone 6)                                    |
-| Sound                                             | Registers only, silent (milestone 7)                     |
+| Battery saves, save states                        | Kept on the device; `.sav` import/export; auto-resume    |
+| Sound (two pulse, wave, noise; AudioWorklet)      | Passes all 12 Blargg `dmg_sound` tests                   |
 | Debugger, PWA                                     | Not yet (milestone 8)                                    |
 
 See [the design document](reactboy-design-doc.md) for the full roadmap.
@@ -42,14 +42,18 @@ pnpm dev          # http://localhost:5173/ReactBoy/
 ## Layout
 
 ```
-packages/core   @reactboy/core — CPU, MMU, cartridge mappers, PPU, timer, joypad, serial
-apps/web        @reactboy/web — React UI, worker host, input, canvas
+packages/core   @reactboy/core — CPU, MMU, cartridge mappers, PPU, APU, timer, joypad,
+                serial, save states
+apps/web        @reactboy/web — React UI, worker host, input, canvas, audio, storage
 scripts         fetch-test-roms.mjs
 ```
 
 The core advances the whole machine one M-cycle at a time. Every CPU memory access ticks
-the timer, PPU, DMA and serial port, so instruction timing comes from the access pattern
-instead of a cycle table. The same opcode tables drive both execution and the disassembler.
+the timer, APU, PPU, DMA and serial port, so instruction timing comes from the access
+pattern instead of a cycle table. The same opcode tables drive both execution and the
+disassembler. The APU's channels catch up lazily, only when a register access, a frame
+sequencer step or a due audio sample can observe them. Each component writes its own part
+of a versioned save state (`GameBoy.serialize()` / `deserialize()`).
 
 The web app runs the core in a worker (or inline if workers are unavailable).
 `requestAnimationFrame` paces it at the DMG's 59.73 Hz, independent of the display's
@@ -58,14 +62,27 @@ canvas. React only re-renders on low-frequency changes (status, cartridge, held 
 via `useSyncExternalStore`. The LCD is scaled by a whole number of device pixels whenever
 that costs little screen space, so pixels stay crisp.
 
+Sound is produced at the device's sample rate and sent with each frame to an AudioWorklet.
+It keeps about 60 ms queued and plays up to 0.5% faster or slower to hold that level, so
+video pacing and the audio clock never drift apart. Sound plays only at 1× speed.
+
+Games, battery saves and save states live in IndexedDB, keyed by a hash of the ROM so saves
+follow the game rather than the file name. Battery RAM is stored about every 2 seconds
+while a game writes to it. A resume state is written on pause, when the page is hidden,
+before switching games and once a minute. It is only used if it is newer than the battery
+save, so a stale state never rolls back an in-game save. `.sav` files use the common layout,
+including the 48-byte MBC3 clock block, so they move to and from other emulators. MBC3
+clocks catch up on real time that passed between sessions.
+
 ## Testing
 
 `pnpm fetch-roms && pnpm test` runs, headlessly in Node:
 
 - Blargg's `cpu_instrs` (all 11), `instr_timing` and `mem_timing`, which report over the
-  serial port
+  serial port, and `dmg_sound` (all 12), which reports in cartridge RAM
 - `dmg-acid2`, compared pixel for pixel with its reference image
-- unit tests for the CPU, timer, PPU timing, joypad, mappers and disassembler
+- unit tests for the CPU, timer, PPU timing, APU output, joypad, mappers, disassembler and
+  save states, plus the web app's storage, audio queue and save flows
 
 CI runs lint, formatting, type checks, all tests and the build on every push and pull
 request, then deploys `master` to GitHub Pages.

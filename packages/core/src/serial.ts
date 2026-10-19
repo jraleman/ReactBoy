@@ -1,4 +1,5 @@
 import { Interrupt, type Interrupts } from './interrupts';
+import type { StateReader, StateWriter, Stateful } from './state';
 
 /** T-cycles to shift out one byte with the internal 8192 Hz clock. */
 const TRANSFER_CYCLES = 8 * 512;
@@ -7,7 +8,7 @@ const TRANSFER_CYCLES = 8 * 512;
  * SB/SC with no link partner attached: bytes shift out and 0xFF shifts in. Sent bytes are
  * reported through {@link onByte}, which is how Blargg's test ROMs report results headlessly.
  */
-export class Serial {
+export class Serial implements Stateful {
   data = 0;
   control = 0x7e;
   onByte: ((byte: number) => void) | null = null;
@@ -36,5 +37,17 @@ export class Serial {
       this.control &= 0x7f;
       this.interrupts.request(Interrupt.Serial);
     }
+  }
+
+  writeState(w: StateWriter): void {
+    w.u8(this.data);
+    w.u8(this.control);
+    w.u16(this.remaining);
+  }
+
+  readState(r: StateReader): void {
+    this.data = r.u8();
+    this.control = r.u8();
+    this.remaining = r.u16();
   }
 }

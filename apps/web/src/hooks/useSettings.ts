@@ -7,10 +7,22 @@ export interface Settings {
   palette: PaletteName;
   shell: ShellTheme;
   speed: number;
+  /** 0-1. */
+  volume: number;
+  muted: boolean;
+  /** Bit n set = sound channel n+1 is heard. */
+  channels: number;
 }
 
 const KEY = 'reactboy:settings';
-const DEFAULTS: Settings = { palette: 'classic', shell: 'grey', speed: 1 };
+const DEFAULTS: Settings = {
+  palette: 'classic',
+  shell: 'grey',
+  speed: 1,
+  volume: 0.8,
+  muted: false,
+  channels: 0x0f,
+};
 
 function load(): Settings {
   try {
@@ -21,7 +33,7 @@ function load(): Settings {
   }
 }
 
-/** Display preferences, remembered per browser. */
+/** Display and sound preferences, remembered per browser. */
 export function useSettings(): [Settings, (patch: Partial<Settings>) => void] {
   const [settings, setSettings] = useState(load);
   const update = useCallback((patch: Partial<Settings>) => {

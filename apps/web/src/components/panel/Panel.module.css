@@ -245,3 +245,199 @@ kbd {
 .section > .heading {
   margin-bottom: 0;
 }
+
+.notice {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* --- Save states ------------------------------------------------------------------------ */
+
+.slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.slotPreview {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 160 / 144;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--rule);
+  color: var(--rule);
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 800;
+  font-style: italic;
+}
+
+.slotPreview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.slotLabel {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.slotTime {
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slotActions {
+  display: flex;
+  gap: 4px;
+}
+
+.small {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 6px;
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.small:hover:not(:disabled) {
+  border-color: var(--ink-muted);
+}
+
+.small:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* --- Recent games ----------------------------------------------------------------------- */
+
+.recent {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recentItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.recentItem + .recentItem {
+  border-top: 1px solid var(--rule);
+}
+
+.recentGame {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recentGame:disabled {
+  cursor: default;
+}
+
+.recentGame:hover:not(:disabled) .recentTitle {
+  text-decoration: underline;
+}
+
+.recentTitle {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recentMeta {
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+
+.recentGame:disabled .recentMeta {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.remove {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 16px;
+  background: none;
+  color: var(--ink-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.remove:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* --- Sound ------------------------------------------------------------------------------ */
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.slider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.slider:disabled {
+  opacity: 0.45;
+}
+
+.volumeValue {
+  min-width: 3ch;
+  color: var(--ink-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

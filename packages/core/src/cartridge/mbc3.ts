@@ -1,29 +1,24 @@
-import { CLOCK_HZ } from '../constants';
+import type { StateReader, StateWriter } from '../state';
 import { type Mbc, ramBankOffset, romBankOffset } from './mbc';
+import { Rtc } from './rtc';
 
-/**
- * MBC3: up to 2 MiB ROM / 32 KiB RAM plus an optional real-time clock. The clock runs on
- * emulated time (so it stays deterministic and pauses with the emulator); it is read via
- * a latch, as on hardware.
- */
+/** MBC3: up to 2 MiB ROM / 32 KiB RAM plus an optional real-time clock. */
 export class Mbc3 implements Mbc {
+  readonly rtc: Rtc | undefined;
   private ramEnabled = false;
   private romBank = 1;
   /** 0-3 selects a RAM bank, 0x08-0x0C an RTC register. */
   private select = 0;
-  private latchArmed = false;
-  /** Live RTC: S, M, H, DL, DH. */
-  private readonly rtc = new Uint8Array(5);
-  private readonly latched = new Uint8Array(5);
-  private rtcCycles = 0;
 
   constructor(
     private readonly rom: Uint8Array,
     readonly ram: Uint8Array,
-    private readonly hasRtc: boolean,
-    /** Total emulated T-cycles, used to advance the RTC lazily. */
-    private readonly now: () => number,
-  ) {}
+    hasRtc: boolean,
+    /** Total emulated T-cycles, which drive the RTC. */
+    now: () => number,
+  ) {
+    this.rtc = hasRtc ? new Rtc(now) : undefined;
+  }
 
   readRom(addr: number): number {
     if (addr < 0x4000) return this.rom[addr] ?? 0xff;
@@ -37,12 +32,8 @@ export class Mbc3 implements Mbc {
       this.romBank = value & 0x7f || 1;
     } else if (addr < 0x6000) {
       this.select = value;
-    } else if (this.hasRtc) {
-      if (value === 1 && this.latchArmed) {
-        this.advanceRtc();
-        this.latched.set(this.rtc);
-      }
-      this.latchArmed = value === 0;
+    } else {
+      this.rtc?.writeLatch(value);
     }
   }
 
@@ -52,8 +43,8 @@ export class Mbc3 implements Mbc {
       if (this.ram.length === 0) return 0xff;
       return this.ram[this.ramOffset(addr)] ?? 0xff;
     }
-    if (this.hasRtc && this.select >= 0x08 && this.select <= 0x0c) {
-      return this.latched[this.select - 0x08] ?? 0xff;
+    if (this.rtc && this.select >= 0x08 && this.select <= 0x0c) {
+      return this.rtc.read(this.select - 0x08);
     }
     return 0xff;
   }
@@ -62,40 +53,28 @@ export class Mbc3 implements Mbc {
     if (!this.ramEnabled) return;
     if (this.select <= 0x03) {
       if (this.ram.length > 0) this.ram[this.ramOffset(addr)] = value;
-    } else if (this.hasRtc && this.select >= 0x08 && this.select <= 0x0c) {
-      this.advanceRtc();
-      this.rtc[this.select - 0x08] = value;
-      if (this.select === 0x08) this.rtcCycles = this.now();
+    } else if (this.rtc && this.select >= 0x08 && this.select <= 0x0c) {
+      this.rtc.write(this.select - 0x08, value);
     }
+  }
+
+  writeState(w: StateWriter): void {
+    w.bytes(this.ram);
+    w.bool(this.ramEnabled);
+    w.u8(this.romBank);
+    w.u8(this.select);
+    this.rtc?.writeState(w);
+  }
+
+  readState(r: StateReader): void {
+    r.bytes(this.ram);
+    this.ramEnabled = r.bool();
+    this.romBank = r.u8();
+    this.select = r.u8();
+    this.rtc?.readState(r);
   }
 
   private ramOffset(addr: number): number {
     return (ramBankOffset(this.ram, this.select) + (addr & 0x1fff)) % this.ram.length;
-  }
-
-  private advanceRtc(): void {
-    const now = this.now();
-    const halted = (this.rtc[4]! & 0x40) !== 0;
-    let seconds = Math.floor((now - this.rtcCycles) / CLOCK_HZ);
-    this.rtcCycles += seconds * CLOCK_HZ;
-    if (halted || seconds <= 0) {
-      if (halted) this.rtcCycles = now;
-      return;
-    }
-    const rtc = this.rtc;
-    seconds += rtc[0]!;
-    rtc[0] = seconds % 60;
-    const minutes = Math.floor(seconds / 60) + rtc[1]!;
-    rtc[1] = minutes % 60;
-    const hours = Math.floor(minutes / 60) + rtc[2]!;
-    rtc[2] = hours % 24;
-    let days = Math.floor(hours / 24) + (rtc[3]! | ((rtc[4]! & 0x01) << 8));
-    let carry = rtc[4]! & 0x80;
-    if (days > 0x1ff) {
-      carry = 0x80;
-      days &= 0x1ff;
-    }
-    rtc[3] = days & 0xff;
-    rtc[4] = (rtc[4]! & 0x40) | carry | (days >> 8);
   }
 }

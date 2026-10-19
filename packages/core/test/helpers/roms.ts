@@ -33,6 +33,23 @@ export function runSerialRom(rom: Uint8Array, maxFrames: number): string {
   return output;
 }
 
+/** Signature newer Blargg ROMs write at 0xA001 once their result at 0xA000 is meaningful. */
+const MEMORY_SIGNATURE = [0xde, 0xb0, 0x61];
+
+/**
+ * Runs a Blargg-style ROM that reports in cartridge RAM rather than over serial: a status
+ * byte at 0xA000 (0x80 while running, 0 for a pass) and text from 0xA004.
+ */
+export function runMemoryRom(rom: Uint8Array, maxFrames: number): { status: number; text: string } {
+  const gb = new GameBoy(rom);
+  const ram = gb.mbc.ram;
+  const done = () => MEMORY_SIGNATURE.every((b, i) => ram[1 + i] === b) && ram[0] !== 0x80;
+  for (let frame = 0; frame < maxFrames && !done(); frame++) gb.runFrame();
+  let text = '';
+  for (let i = 4; i < ram.length && ram[i] !== 0; i++) text += String.fromCharCode(ram[i]!);
+  return { status: done() ? ram[0]! : -1, text: text.trim() };
+}
+
 /**
  * Decodes a non-interlaced greyscale PNG (any bit depth up to 8) into one value per pixel,
  * scaled to 0-255. Enough for the test-ROM reference images without a PNG dependency.

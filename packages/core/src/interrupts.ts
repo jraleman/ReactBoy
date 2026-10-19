@@ -1,3 +1,5 @@
+import type { StateReader, StateWriter, Stateful } from './state';
+
 /** Interrupt bits in IE/IF, in priority order (lowest bit wins). */
 export const Interrupt = {
   VBlank: 0x01,
@@ -10,7 +12,7 @@ export const Interrupt = {
 export type InterruptBit = (typeof Interrupt)[keyof typeof Interrupt];
 
 /** The IE (0xFFFF) and IF (0xFF0F) registers. */
-export class Interrupts {
+export class Interrupts implements Stateful {
   enable = 0x00;
   flags = 0xe1;
 
@@ -30,5 +32,15 @@ export class Interrupts {
 
   writeFlags(value: number): void {
     this.flags = value & 0x1f;
+  }
+
+  writeState(w: StateWriter): void {
+    w.u8(this.enable);
+    w.u8(this.flags);
+  }
+
+  readState(r: StateReader): void {
+    this.enable = r.u8();
+    this.flags = r.u8();
   }
 }

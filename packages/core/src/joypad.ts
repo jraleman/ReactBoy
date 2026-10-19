@@ -1,4 +1,5 @@
 import { Interrupt, type Interrupts } from './interrupts';
+import type { StateReader, StateWriter, Stateful } from './state';
 
 export const Button = {
   Right: 0,
@@ -14,7 +15,7 @@ export const Button = {
 export type ButtonId = (typeof Button)[keyof typeof Button];
 
 /** P1/JOYP (0xFF00): a 2x4 button matrix selected by bits 4 (d-pad) and 5 (buttons). */
-export class Joypad {
+export class Joypad implements Stateful {
   /** Bit set = button held, laid out as in {@link Button}. */
   private held = 0;
   private select = 0x30;
@@ -43,6 +44,15 @@ export class Joypad {
 
   anyPressed(): boolean {
     return this.held !== 0;
+  }
+
+  /** Only the select lines are saved: buttons stay as the player is holding them now. */
+  writeState(w: StateWriter): void {
+    w.u8(this.select);
+  }
+
+  readState(r: StateReader): void {
+    this.select = r.u8() & 0x30;
   }
 
   private raiseOnFallingEdge(before: number): void {

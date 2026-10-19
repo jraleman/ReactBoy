@@ -7,11 +7,26 @@ import {
   type CartridgeHeader,
   type Palette,
 } from '@reactboy/core';
+import { AudioOutput } from '../audio/output';
 import { GAMEPAD_BUTTONS, type InputSource } from '../input/buttons';
+import { openStore } from '../storage/idb';
+import { romKey } from '../storage/rom-key';
+import type { GameStore, ManualSlot, RecentGame, StateInfo } from '../storage/store';
 import { createEmulatorHost } from './host';
 import type { ClientMessage, HostMessage, Post } from './protocol';
 
 export type EmulatorStatus = 'empty' | 'running' | 'paused' | 'error';
+
+/** Sound waits for a user gesture ('locked'), then plays, or the browser can't play it. */
+export type SoundStatus = 'locked' | 'on' | 'unavailable';
+
+export interface AudioSettings {
+  /** 0-1. */
+  volume: number;
+  muted: boolean;
+  /** Bit n set = channel n+1 is heard. */
+  channels: number;
+}
 
 export interface EmulatorState {
   status: EmulatorStatus;
@@ -24,21 +39,46 @@ export interface EmulatorState {
   inline: boolean;
   /** Bit n set = button n held by any source; drives the on-screen pressed state. */
   pressed: number;
+  /** Storage id of the loaded game. */
+  gameId: string | null;
+  /** The loaded game's save-state slots, excluding the automatic one. */
+  slots: StateInfo[];
+  /** Games whose ROMs are stored on this device, most recent first. */
+  recent: RecentGame[];
+  /** The latest save/load event, for the player: "Saved to slot 2." Clears itself. */
+  notice: string | null;
+  /** False when nothing outlives the page (IndexedDB unavailable); null until known. */
+  persistent: boolean | null;
+  sound: SoundStatus;
+}
+
+export interface EmulatorClientOptions {
+  /** Where games and saves are kept; the device's IndexedDB by default. */
+  store?: GameStore | Promise<GameStore>;
 }
 
 /** Frames the loop may run in one go to catch up after a hiccup, per 1x of speed. */
 const MAX_CATCH_UP = 4;
+/** How often a running game refreshes its resume state, as a backstop for crashes. */
+const AUTOSAVE_MS = 60_000;
+const NOTICE_MS = 5_000;
 
 /**
  * The UI's handle on the emulator. Owns the worker, paces frames from requestAnimationFrame,
- * draws them to the canvas and merges input from every source. React reads its state via
- * {@link subscribe}/{@link getSnapshot} (useSyncExternalStore) and never re-renders per frame.
+ * draws them to the canvas, merges input from every source and keeps games and saves in
+ * storage. React reads its state via {@link subscribe}/{@link getSnapshot}
+ * (useSyncExternalStore) and never re-renders per frame.
  */
 export class EmulatorClient {
   private state: EmulatorState;
   private readonly listeners = new Set<() => void>();
   private readonly send: Post<ClientMessage>;
   private readonly worker: Worker | null;
+  private readonly store: Promise<GameStore>;
+  private readonly audio: AudioOutput;
+  private audioSettings: AudioSettings = { volume: 1, muted: false, channels: 0x0f };
+  /** What the host was last told to produce, to send changes only. */
+  private hostAudio = { sampleRate: 0, channels: 0x0f };
 
   private canvas: CanvasRenderingContext2D | null = null;
   private image: ImageData | null = null;
@@ -48,12 +88,20 @@ export class EmulatorClient {
   private inFlight = false;
   private framesThisSecond = 0;
   private secondStart = 0;
+  private lastAutosave = 0;
+  private noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Per-button bitmask of the sources holding it. */
   private readonly held = new Map<ButtonId, number>();
   private readonly gamepadHeld = new Set<ButtonId>();
 
-  constructor() {
+  private nextRequest = 1;
+  private readonly requests = new Map<number, (reply: Reply) => void>();
+  /** ROMs sent to the host, kept until it accepts them so they can be stored. */
+  private readonly loading = new Map<string, ArrayBuffer>();
+  private askedForPersistence = false;
+
+  constructor({ store = openStore() }: EmulatorClientOptions = {}) {
     let worker: Worker | null = null;
     try {
       worker = new Worker(new URL('./emulator.worker.ts', import.meta.url), { type: 'module' });
@@ -77,7 +125,22 @@ export class EmulatorClient {
       fps: 0,
       inline: !worker,
       pressed: 0,
+      gameId: null,
+      slots: [],
+      recent: [],
+      notice: null,
+      persistent: null,
+      sound: 'locked',
     };
+    this.audio = new AudioOutput((ready) => {
+      this.update({ sound: ready ? 'on' : 'unavailable' });
+      this.syncAudio();
+    });
+    this.store = Promise.resolve(store);
+    void this.store.then((s) => {
+      this.update({ persistent: s.persistent });
+      return this.refreshRecent();
+    });
   }
 
   // --- Store ----------------------------------------------------------------------------
@@ -94,6 +157,12 @@ export class EmulatorClient {
     this.listeners.forEach((listener) => listener());
   }
 
+  private notify(notice: string): void {
+    clearTimeout(this.noticeTimer);
+    this.update({ notice });
+    this.noticeTimer = setTimeout(() => this.update({ notice: null }), NOTICE_MS);
+  }
+
   // --- Commands -------------------------------------------------------------------------
 
   attachCanvas(canvas: HTMLCanvasElement | null): void {
@@ -103,20 +172,37 @@ export class EmulatorClient {
 
   async loadRom(file: Blob): Promise<void> {
     const rom = await file.arrayBuffer();
-    this.send({ type: 'load', rom }, [rom]);
+    await this.start(rom, romKey(rom));
+  }
+
+  /** Starts a game stored on this device. */
+  async loadRecent(id: string): Promise<void> {
+    const rom = await this.useStore((store) => store.getRom(id));
+    if (rom) return this.start(rom, id);
+    this.update({ error: 'That game is no longer stored on this device.' });
+    await this.refreshRecent();
+  }
+
+  /** Forgets a stored ROM; its saves stay for when the file is loaded again. */
+  async removeRecent(id: string): Promise<void> {
+    await this.useStore((store) => store.removeRom(id));
+    await this.refreshRecent();
   }
 
   play(): void {
     if (this.state.status !== 'paused') return;
     this.update({ status: 'running' });
     this.startLoop();
+    this.syncAudio();
   }
 
   pause(): void {
     if (this.state.status !== 'running') return;
     this.update({ status: 'paused', fps: 0 });
     this.stopLoop();
+    this.syncAudio();
     this.releaseAll();
+    void this.persist();
   }
 
   reset(): void {
@@ -133,12 +219,23 @@ export class EmulatorClient {
 
   setSpeed(speed: number): void {
     this.update({ speed });
+    this.syncAudio();
+  }
+
+  /** Lets sound start; browsers only allow that from a user gesture such as a key press. */
+  unlockAudio(): void {
+    this.audio.unlock();
+  }
+
+  setAudio(settings: AudioSettings): void {
+    this.audioSettings = settings;
+    this.audio.setVolume(settings.muted ? 0 : settings.volume);
+    this.syncAudio();
   }
 
   setPalette(palette: Palette): void {
     this.send({ type: 'palette', palette });
-    // Redraw the paused frame in the new colors.
-    if (this.state.status === 'paused') this.stepFrame();
+    this.redraw();
   }
 
   setButton(source: InputSource, button: ButtonId, pressed: boolean): void {
@@ -155,8 +252,181 @@ export class EmulatorClient {
 
   dispose(): void {
     this.stopLoop();
+    this.audio.close();
+    clearTimeout(this.noticeTimer);
     this.worker?.terminate();
     this.listeners.clear();
+  }
+
+  // --- Saves ----------------------------------------------------------------------------
+
+  /**
+   * Stores the current game's battery RAM and a state to resume from next time. Runs on
+   * pause, when the page is hidden, before switching games and once a minute in play.
+   */
+  async persist(): Promise<void> {
+    const id = this.state.gameId;
+    if (!id) return;
+    try {
+      // The host reports unsaved battery RAM before answering, so the battery record is
+      // always stamped no later than this state.
+      const data = await this.request((rid) => ({ type: 'snapshot', id: rid }));
+      if (!data) return;
+      const store = await this.store;
+      await store.putState(id, { slot: 'auto', data, created: Date.now(), thumbnail: null });
+    } catch (error) {
+      this.storageFailed(error);
+    }
+  }
+
+  async saveState(slot: ManualSlot): Promise<void> {
+    const id = this.state.gameId;
+    if (!id) return;
+    try {
+      const data = await this.request((rid) => ({ type: 'snapshot', id: rid }));
+      if (!data) return;
+      const info: StateInfo = { slot, created: Date.now(), thumbnail: this.thumbnail() };
+      const store = await this.store;
+      await store.putState(id, { ...info, data });
+      if (this.state.gameId !== id) return;
+      this.update({ slots: [...this.state.slots.filter((s) => s.slot !== slot), info] });
+      this.notify(`Saved to slot ${slot}.`);
+    } catch (error) {
+      this.storageFailed(error);
+    }
+  }
+
+  async loadState(slot: ManualSlot): Promise<void> {
+    const id = this.state.gameId;
+    if (!id) return;
+    const saved = await this.useStore((store) => store.getState(id, slot));
+    if (!saved || this.state.gameId !== id) return;
+    try {
+      await this.request((rid) => ({ type: 'restore', id: rid, state: saved.data }));
+      this.notify(`Loaded slot ${slot}.`);
+      this.redraw();
+    } catch (error) {
+      this.notify(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** The battery RAM as a .sav file, or null if the game has no battery. */
+  async exportBattery(): Promise<ArrayBuffer | null> {
+    if (!this.state.header?.hasBattery) return null;
+    return this.request((rid) => ({ type: 'export-battery', id: rid }));
+  }
+
+  /** Replaces the battery save with a .sav file and restarts the game. */
+  async importBattery(file: Blob): Promise<void> {
+    if (!this.state.header?.hasBattery) return;
+    this.send({ type: 'reset', battery: await file.arrayBuffer() });
+    this.notify('Save imported. The game restarted.');
+  }
+
+  private async start(rom: ArrayBuffer, key: string): Promise<void> {
+    await this.persist();
+    const [battery, auto] = await this.useStore((store) =>
+      Promise.all([store.getBattery(key), store.getState(key, 'auto')]),
+    ).then((found) => found ?? [null, null]);
+    // A resume state older than the battery save would roll back progress saved since.
+    const resume = auto && (!battery || auto.created >= battery.updated) ? auto.data : null;
+    this.loading.set(key, rom);
+    this.send({ type: 'load', rom, key, battery: battery?.data ?? null, state: resume });
+  }
+
+  private async onLoaded(key: string, header: CartridgeHeader): Promise<void> {
+    const rom = this.loading.get(key);
+    this.loading.delete(key);
+    await this.useStore(async (store) => {
+      // Absent after a restart, which doesn't count as playing it again.
+      if (rom) {
+        const game = { id: key, title: header.title, size: rom.byteLength, lastPlayed: Date.now() };
+        await store.putRom(game, rom);
+        this.askForPersistence();
+      }
+      const slots = await store.listStates(key);
+      if (this.state.gameId === key) {
+        this.update({ slots: slots.filter((s) => s.slot !== 'auto') });
+      }
+    });
+    await this.refreshRecent();
+  }
+
+  private async refreshRecent(): Promise<void> {
+    const recent = await this.useStore((store) => store.listRecent());
+    if (recent) this.update({ recent });
+  }
+
+  /** Runs a storage operation, reporting failures instead of throwing. */
+  private async useStore<T>(operation: (store: GameStore) => Promise<T>): Promise<T | null> {
+    try {
+      return await operation(await this.store);
+    } catch (error) {
+      this.storageFailed(error);
+      return null;
+    }
+  }
+
+  private storageFailed(error: unknown): void {
+    const quota = error instanceof DOMException && error.name === 'QuotaExceededError';
+    this.notify(
+      quota
+        ? 'Couldn’t save: this device is out of storage space for ReactBoy.'
+        : 'Couldn’t save on this device.',
+    );
+  }
+
+  /** Asks the browser not to evict saves under storage pressure (notably iOS Safari). */
+  private askForPersistence(): void {
+    if (this.askedForPersistence) return;
+    this.askedForPersistence = true;
+    void navigator.storage?.persist?.().catch(() => false);
+  }
+
+  /** The last frame drawn, as a PNG data URL for save-slot previews. */
+  private thumbnail(): string | null {
+    if (!this.image) return null;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = SCREEN_WIDTH;
+      canvas.height = SCREEN_HEIGHT;
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      context.putImageData(this.image, 0, 0);
+      return canvas.toDataURL('image/png');
+    } catch {
+      return null;
+    }
+  }
+
+  private request(make: (id: number) => ClientMessage): Promise<ArrayBuffer | null> {
+    const id = this.nextRequest++;
+    return new Promise((resolve, reject) => {
+      this.requests.set(id, ({ data, error }) =>
+        error ? reject(new Error(error)) : resolve(data),
+      );
+      this.send(make(id));
+    });
+  }
+
+  /**
+   * Has the host produce sound only while it can be heard: running at 1x (other speeds
+   * would starve or flood the output) and not muted.
+   */
+  private syncAudio(): void {
+    const { volume, muted, channels } = this.audioSettings;
+    const audible = this.state.status === 'running' && this.state.speed === 1 && !muted;
+    const sampleRate = audible && volume > 0 ? this.audio.sampleRate : 0;
+    if (sampleRate === this.hostAudio.sampleRate && channels === this.hostAudio.channels) return;
+    this.hostAudio = { sampleRate, channels };
+    this.send({ type: 'audio', sampleRate, channels });
+  }
+
+  /** Shows the current frame again (e.g. in new colors) while paused. */
+  private redraw(): void {
+    if (this.state.status !== 'paused') return;
+    this.inFlight = true;
+    this.send({ type: 'run', frames: 0 });
   }
 
   // --- Frame loop -----------------------------------------------------------------------
@@ -165,6 +435,7 @@ export class EmulatorClient {
     if (this.rafId) return;
     this.lastTime = performance.now();
     this.secondStart = this.lastTime;
+    this.lastAutosave = this.lastTime;
     this.framesThisSecond = 0;
     this.due = 0;
     this.rafId = requestAnimationFrame(this.loop);
@@ -198,15 +469,31 @@ export class EmulatorClient {
       this.framesThisSecond = 0;
       if (fps !== this.state.fps) this.update({ fps });
     }
+
+    if (now - this.lastAutosave >= AUTOSAVE_MS) {
+      this.lastAutosave = now;
+      void this.persist();
+    }
   };
 
   private receive(message: HostMessage): void {
     switch (message.type) {
       case 'loaded':
-        this.update({ status: 'running', header: message.header, error: null });
+        this.update({
+          status: 'running',
+          header: message.header,
+          error: null,
+          gameId: message.key,
+          slots: [],
+        });
+        if (message.resumed) this.notify('Resumed where you left off.');
+        this.audio.clear();
         this.startLoop();
+        this.syncAudio();
+        void this.onLoaded(message.key, message.header);
         break;
       case 'error':
+        this.loading.delete(message.key);
         // A bad file while a game is loaded leaves that game running and just reports.
         if (!this.state.header) this.stopLoop();
         this.update({
@@ -216,6 +503,7 @@ export class EmulatorClient {
         break;
       case 'frame':
         this.inFlight = false;
+        if (message.audio) this.audio.push(new Float32Array(message.audio));
         if (!message.pixels) break;
         if (this.canvas) {
           this.image ??= new ImageData(SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -223,6 +511,15 @@ export class EmulatorClient {
           this.canvas.putImageData(this.image, 0, 0);
         }
         this.send({ type: 'recycle', pixels: message.pixels }, [message.pixels]);
+        break;
+      case 'battery': {
+        const battery = { data: message.data, updated: Date.now() };
+        void this.useStore((store) => store.putBattery(message.key, battery));
+        break;
+      }
+      case 'reply':
+        this.requests.get(message.id)?.(message);
+        this.requests.delete(message.id);
         break;
     }
   }
@@ -263,6 +560,8 @@ export class EmulatorClient {
     if (this.state.pressed) this.update({ pressed: 0 });
   }
 }
+
+type Reply = Extract<HostMessage, { type: 'reply' }>;
 
 const SOURCE_BITS: Record<InputSource, number> = { keyboard: 1, touch: 2, gamepad: 4 };
 

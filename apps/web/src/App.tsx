@@ -17,7 +17,7 @@ const hasFiles = (event: DragEvent) => event.dataTransfer.types.includes('Files'
 
 export function App() {
   const client = useEmulatorClient();
-  const { status, header, pressed } = useEmulatorState();
+  const { status, header, pressed, notice } = useEmulatorState();
   const [settings, updateSettings] = useSettings();
   const scale = useDeviceScale();
   const [dragging, setDragging] = useState(false);
@@ -26,6 +26,27 @@ export function App() {
   useKeyboard(client, DEFAULT_KEYMAP);
   useEffect(() => client.setPalette(palette), [client, palette]);
   useEffect(() => client.setSpeed(settings.speed), [client, settings.speed]);
+  const { volume, muted, channels } = settings;
+  useEffect(() => client.setAudio({ volume, muted, channels }), [client, volume, muted, channels]);
+  useEffect(() => {
+    // Any gesture may start sound; later ones resume it if the system suspended it.
+    const unlock = () => client.unlockAudio();
+    const options = { capture: true, passive: true };
+    window.addEventListener('pointerdown', unlock, options);
+    window.addEventListener('keydown', unlock, options);
+    return () => {
+      window.removeEventListener('pointerdown', unlock, options);
+      window.removeEventListener('keydown', unlock, options);
+    };
+  }, [client]);
+  useEffect(() => {
+    // Hidden is the last event mobile browsers reliably deliver before discarding a tab.
+    const save = () => {
+      if (document.visibilityState === 'hidden') void client.persist();
+    };
+    document.addEventListener('visibilitychange', save);
+    return () => document.removeEventListener('visibilitychange', save);
+  }, [client]);
 
   const onTouch = useCallback(
     (button: ButtonId, down: boolean) => client.setButton('touch', button, down),
@@ -67,6 +88,7 @@ export function App() {
       <p className="visually-hidden" role="status" aria-live="polite">
         {status === 'running' && header ? `Playing ${header.title}` : ''}
         {status === 'paused' ? 'Paused' : ''}
+        {notice ? ` ${notice}` : ''}
       </p>
       {dragging && (
         <div className={styles.dropHint} aria-hidden="true">

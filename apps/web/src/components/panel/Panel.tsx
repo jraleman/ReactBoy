@@ -4,8 +4,11 @@ import { useEmulatorClient, useEmulatorState } from '../../hooks/useEmulator';
 import type { Settings, ShellTheme } from '../../hooks/useSettings';
 import { BUTTON_LABELS, DEFAULT_KEYMAP } from '../../input/buttons';
 import styles from './Panel.module.css';
+import { RecentGames } from './RecentGames';
+import { SaveSlots } from './SaveSlots';
 
 const SPEEDS = [0.5, 1, 2, 4];
+const CHANNELS = ['Pulse 1', 'Pulse 2', 'Wave', 'Noise'];
 const PALETTE_NAMES: Record<PaletteName, string> = {
   classic: 'Original',
   grey: 'Pocket',
@@ -42,7 +45,7 @@ interface Props {
 
 export function Panel({ settings, onSettings, onLoad }: Props) {
   const client = useEmulatorClient();
-  const { status, header, error, fps } = useEmulatorState();
+  const { status, header, error, fps, notice, sound } = useEmulatorState();
   const fileInput = useRef<HTMLInputElement>(null);
   const id = useId();
   const loaded = status === 'running' || status === 'paused';
@@ -76,6 +79,7 @@ export function Panel({ settings, onSettings, onLoad }: Props) {
           </p>
         )}
         {error && loaded && <p className={styles.warning}>Couldn’t load that file. {error}</p>}
+        {notice && <p className={styles.notice}>{notice}</p>}
         <div className={styles.row}>
           <button
             type="button"
@@ -149,6 +153,62 @@ export function Panel({ settings, onSettings, onLoad }: Props) {
           </p>
         )}
       </section>
+
+      <section className={styles.section} aria-labelledby={`${id}-sound`}>
+        <h2 id={`${id}-sound`} className={styles.heading}>
+          Sound
+        </h2>
+        <div className={styles.volume}>
+          <button
+            type="button"
+            className={styles.button}
+            aria-pressed={settings.muted}
+            onClick={() => onSettings({ muted: !settings.muted })}
+          >
+            {settings.muted ? 'Unmute' : 'Mute'}
+          </button>
+          <input
+            type="range"
+            className={styles.slider}
+            min={0}
+            max={100}
+            step={5}
+            value={Math.round(settings.volume * 100)}
+            disabled={settings.muted}
+            aria-label="Volume"
+            aria-valuetext={`${Math.round(settings.volume * 100)}%`}
+            onChange={(event) => onSettings({ volume: Number(event.target.value) / 100 })}
+          />
+          <span className={styles.volumeValue} aria-hidden="true">
+            {settings.muted ? 'Off' : `${Math.round(settings.volume * 100)}%`}
+          </span>
+        </div>
+        <fieldset className={styles.fieldset}>
+          <legend className={styles.legend}>Channels</legend>
+          <div className={styles.segmented}>
+            {CHANNELS.map((name, i) => (
+              <label key={name} className={styles.segment}>
+                <input
+                  type="checkbox"
+                  checked={(settings.channels & (1 << i)) !== 0}
+                  onChange={() => onSettings({ channels: settings.channels ^ (1 << i) })}
+                />
+                <span>{name}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        {sound === 'unavailable' ? (
+          <p className={styles.note}>This browser can’t play the emulator’s sound.</p>
+        ) : settings.speed !== 1 ? (
+          <p className={styles.note}>Sound plays at 1× speed only.</p>
+        ) : sound === 'locked' && loaded ? (
+          <p className={styles.note}>Press a key or tap anywhere to turn sound on.</p>
+        ) : null}
+      </section>
+
+      {header && loaded && <SaveSlots header={header} />}
+      <RecentGames />
 
       <section className={styles.section} aria-label="Appearance">
         <fieldset className={styles.fieldset}>

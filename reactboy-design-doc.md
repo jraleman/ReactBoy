@@ -312,9 +312,55 @@ With the source available locally, the assumptions in section 1 were checked:
   Game Boy pixel) and snaps to whole device pixels when that costs under 20% of the size.
   Palettes and case colors are remembered in localStorage.
 
+### Milestones 6–7: done (2026-10-18)
+
+Decisions made before starting: store ROM bytes for one-click relaunch, offer three manual
+save-state slots plus an automatic resume state, and do M6 before M7.
+
+- **Save states:** each core component writes its own section of one versioned binary
+  format (`RBST`, version 1). The header carries the ROM's checksums and a wall-clock
+  timestamp. `deserialize` takes a backup first and rolls back on any error. The PPU now
+  keeps shades (0–3) and colors frames when presenting them, so states don't depend on the
+  palette, and a palette change recolors a paused frame without running the emulator.
+- **Battery saves:** the MMU flags writes to cartridge RAM, and the worker host reports
+  battery RAM about every 2 seconds while it changes. `.sav` files follow the common
+  layout, including the 48-byte MBC3 clock block (44-byte variants are read too). MBC3's
+  clock moved into an `Rtc` class that catches up on wall-clock time between sessions, from
+  battery saves and from save states. Restart keeps battery RAM, which the old reset
+  discarded.
+- **Storage (`apps/web/src/storage`):** IndexedDB with separate stores for game metadata,
+  ROM bytes, battery saves and states. Games are keyed by a 64-bit content hash in plain JS
+  (`crypto.subtle` is missing on plain-HTTP LAN origins). The six most recent ROMs are kept,
+  but saves are never deleted automatically. When IndexedDB can't open, an in-memory store
+  is used and the UI says that saves won't survive the page. The resume state is written on
+  pause, when the page is hidden, before switching games and once a minute. It is only
+  restored if it is newer than the battery save, so a crash can't roll back an in-game
+  save. The app asks for persistent storage once, for iOS eviction.
+- **APU:** two pulse channels (sweep on the first), wave and noise. The frame sequencer is
+  clocked by the falling edge of DIV bit 4, including edges caused by DIV writes. All 12
+  Blargg `dmg_sound` tests pass, including the DMG wave-RAM timing quirks (access only in
+  the cycle the channel fetches; corruption on retrigger). Channels advance lazily, in spans
+  that return the integral of their output, so averaging into output samples is exact. They
+  only catch up on register access, frame-sequencer steps and due samples. Disabled
+  channels stand still, as in SameBoy. A DC-blocking high-pass filter models the output
+  capacitor.
+- **Audio output:** samples travel with each frame's pixels to the main thread, then to an
+  AudioWorklet. Its queue keeps about 60 ms buffered with dynamic rate control (±0.5%),
+  fades instead of clicking when it runs dry, and skips ahead when far behind. Pacing stays
+  on `requestAnimationFrame`; the rate control absorbs drift, so the audio clock doesn't
+  have to drive the frame loop. Sound is generated only while audible: running, at 1×, and
+  not muted. It starts on the first gesture. On iOS, `navigator.audioSession` is set to
+  `playback` so the silent switch doesn't mute it.
+- **Performance:** after the lazy APU, about 2.3 ms/frame for the busy loop (was 2.1) and
+  1.5 ms/frame for `dmg-acid2` (was 1.3), with or without 48 kHz output. The benchmark now
+  includes the audio case.
+
 ### Not yet done / follow-ups
 
 - Playwright E2E in CI (verified manually with Playwright for now), keyboard remapping UI,
   Mooneye acceptance tests, the LY=153 quirk and mid-scanline PPU effects.
+- APU obscura not covered by the test ROMs: envelope "zombie mode" writes and the
+  sub-M-cycle timing of square-channel triggers.
+- Milestone 8: debugger, PWA, and keyboard shortcuts for save slots.
 - One-time GitHub setting: Pages source must be switched to "GitHub Actions" for the new
   deploy job (previously the `gh-pages` branch).

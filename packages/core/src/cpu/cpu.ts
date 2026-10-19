@@ -1,4 +1,5 @@
 import type { Interrupts } from '../interrupts';
+import type { StateReader, StateWriter, Stateful } from '../state';
 import { CB_OPCODES } from './cb-opcodes';
 import { OPCODES } from './opcodes';
 import { A, B, C, D, E, F, FLAG_C, FLAG_H, FLAG_N, FLAG_Z, H, HL_INDIRECT, L } from './registers';
@@ -20,7 +21,7 @@ export interface Bus {
  *
  * Methods below `step()` are the micro-operations the opcode tables are built from.
  */
-export class Cpu {
+export class Cpu implements Stateful {
   /** B, C, D, E, H, L, F, A — see ./registers. */
   readonly r = new Uint8Array(8);
   sp = 0;
@@ -49,6 +50,33 @@ export class Cpu {
     this.sp = 0xfffe;
     this.pc = 0x0100;
     this.ime = this.imeScheduled = this.halted = this.stopped = this.locked = this.haltBug = false;
+  }
+
+  writeState(w: StateWriter): void {
+    w.bytes(this.r);
+    w.u16(this.sp);
+    w.u16(this.pc);
+    w.u8(
+      (this.ime ? 0x01 : 0) |
+        (this.halted ? 0x02 : 0) |
+        (this.stopped ? 0x04 : 0) |
+        (this.locked ? 0x08 : 0) |
+        (this.imeScheduled ? 0x10 : 0) |
+        (this.haltBug ? 0x20 : 0),
+    );
+  }
+
+  readState(r: StateReader): void {
+    r.bytes(this.r);
+    this.sp = r.u16();
+    this.pc = r.u16();
+    const flags = r.u8();
+    this.ime = (flags & 0x01) !== 0;
+    this.halted = (flags & 0x02) !== 0;
+    this.stopped = (flags & 0x04) !== 0;
+    this.locked = (flags & 0x08) !== 0;
+    this.imeScheduled = (flags & 0x10) !== 0;
+    this.haltBug = (flags & 0x20) !== 0;
   }
 
   /** Runs one instruction, interrupt dispatch, or idle M-cycle while halted. */

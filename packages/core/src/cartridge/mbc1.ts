@@ -1,3 +1,4 @@
+import type { StateReader, StateWriter } from '../state';
 import { type Mbc, ramBankOffset, romBankOffset } from './mbc';
 
 /** MBC1: up to 2 MiB ROM / 32 KiB RAM, with a mode bit that reuses the upper bank bits. */
@@ -31,6 +32,22 @@ export class Mbc1 implements Mbc {
 
   writeRam(addr: number, value: number): void {
     if (this.ramEnabled && this.ram.length > 0) this.ram[this.ramOffset(addr)] = value;
+  }
+
+  writeState(w: StateWriter): void {
+    w.bytes(this.ram);
+    w.bool(this.ramEnabled);
+    w.u8(this.bank1);
+    w.u8(this.bank2);
+    w.u8(this.mode);
+  }
+
+  readState(r: StateReader): void {
+    r.bytes(this.ram);
+    this.ramEnabled = r.bool();
+    this.bank1 = r.u8();
+    this.bank2 = r.u8();
+    this.mode = r.u8();
   }
 
   private ramOffset(addr: number): number {

@@ -1,5 +1,11 @@
-/** A cartridge as seen from the bus: ROM at 0x0000-0x7FFF and external RAM at 0xA000-0xBFFF. */
-export interface Mbc {
+import type { Stateful } from '../state';
+import type { Rtc } from './rtc';
+
+/**
+ * A cartridge as seen from the bus: ROM at 0x0000-0x7FFF and external RAM at 0xA000-0xBFFF.
+ * Its save state covers the mapper registers and RAM, not the ROM.
+ */
+export interface Mbc extends Stateful {
   readRom(addr: number): number;
   /** Writes to ROM space configure the mapper. */
   writeRom(addr: number, value: number): void;
@@ -7,6 +13,8 @@ export interface Mbc {
   writeRam(addr: number, value: number): void;
   /** Battery-backed RAM contents (empty when the cartridge has none). */
   readonly ram: Uint8Array;
+  /** The cartridge's real-time clock (MBC3 only). */
+  readonly rtc?: Rtc | undefined;
 }
 
 /** Offset of a 16 KiB ROM bank, wrapped to the banks actually present. */
