@@ -11,6 +11,10 @@ export class Mbc2 implements Mbc {
     readonly ram: Uint8Array,
   ) {}
 
+  get romBank(): number {
+    return this.bank;
+  }
+
   readRom(addr: number): number {
     if (addr < 0x4000) return this.rom[addr] ?? 0xff;
     return this.rom[romBankOffset(this.rom, this.bank) + (addr & 0x3fff)] ?? 0xff;

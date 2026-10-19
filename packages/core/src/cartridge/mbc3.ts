@@ -6,7 +6,7 @@ import { Rtc } from './rtc';
 export class Mbc3 implements Mbc {
   readonly rtc: Rtc | undefined;
   private ramEnabled = false;
-  private romBank = 1;
+  romBank = 1;
   /** 0-3 selects a RAM bank, 0x08-0x0C an RTC register. */
   private select = 0;
 

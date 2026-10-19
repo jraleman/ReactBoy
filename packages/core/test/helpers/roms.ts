@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
-import { GameBoy } from '../../src';
+import { CYCLES_PER_FRAME, GameBoy } from '../../src';
 
 const ROMS_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../../roms/test');
 
@@ -31,6 +31,26 @@ export function runSerialRom(rom: Uint8Array, maxFrames: number): string {
     if (/Passed|Failed/.test(output)) break;
   }
   return output;
+}
+
+/** B, C, D, E, H, L when a Mooneye test passes; a failure sets them all to 0x42. */
+const MOONEYE_PASS = [3, 5, 8, 13, 21, 34];
+
+/**
+ * Runs a Mooneye test until it reaches its `LD B,B` breakpoint. Returns null if it passed,
+ * otherwise why not.
+ */
+export function runMooneyeRom(rom: Uint8Array, maxFrames: number): string | null {
+  const gb = new GameBoy(rom);
+  const budget = maxFrames * CYCLES_PER_FRAME;
+  while (gb.peek(gb.cpu.pc) !== 0x40) {
+    if (gb.cycles > budget || gb.cpu.locked) return gb.cpu.locked ? 'CPU locked up' : 'timed out';
+    gb.step();
+  }
+  const regs = Array.from(gb.cpu.r.subarray(0, 6));
+  return MOONEYE_PASS.every((value, i) => regs[i] === value)
+    ? null
+    : `registers ${regs.map((v) => v.toString(16).padStart(2, '0')).join(' ')}`;
 }
 
 /** Signature newer Blargg ROMs write at 0xA001 once their result at 0xA000 is meaningful. */

@@ -3,7 +3,7 @@ import type { ButtonId } from '@reactboy/core';
 import type { EmulatorClient } from '../worker/client';
 
 /** Elements where the keyboard belongs to the control, not the game. */
-const isEditable = (target: EventTarget | null) =>
+export const isEditable = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   (target.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName));
 

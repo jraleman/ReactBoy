@@ -31,9 +31,25 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm typecheck
-      # Includes the headless ROM conformance suite (Blargg, dmg-acid2).
+      # Includes the headless ROM conformance suite (Blargg, Mooneye, dmg-acid2).
       - run: pnpm test
       - run: pnpm build
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm --filter @reactboy/web exec playwright install --with-deps chromium
+      # Against the production build: rendering, input, saves, the debugger and offline use.
+      - run: pnpm test:e2e
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: apps/web/test-results
+          retention-days: 7
 
       - name: Upload site
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'

@@ -6,8 +6,9 @@ const setup = (tac: number) => {
   const interrupts = new Interrupts();
   interrupts.flags = 0;
   const timer = new Timer(interrupts);
+  // Set directly: a TAC write would look for an edge in the M-cycle leading up to counter 0.
   timer.counter = 0;
-  timer.writeTac(tac);
+  timer.tac = tac;
   return { timer, interrupts };
 };
 
@@ -42,6 +43,19 @@ describe('Timer', () => {
     mcycles(timer, 1);
     expect(timer.tima).toBe(0x12);
     expect(interrupts.flags).toBe(0);
+  });
+
+  it('counts an edge that falls in the M-cycle the timer is enabled', () => {
+    // TAC writes land before the counter advances in their M-cycle (Mooneye's rapid_toggle).
+    const { timer } = setup(0x00); // stopped, 4096 Hz selected
+    timer.counter = 0x3fc; // bit 9 high
+    timer.tick(); // bit 9 falls while the timer is still stopped...
+    timer.writeTac(0x04); // ...but the write lands first
+    expect(timer.tima).toBe(1);
+    mcycles(timer, 1);
+    timer.writeTac(0x00);
+    timer.writeTac(0x04); // one M-cycle later there is no edge left to count
+    expect(timer.tima).toBe(1);
   });
 
   it('bumps TIMA when resetting DIV causes a falling edge', () => {

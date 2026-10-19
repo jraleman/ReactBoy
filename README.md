@@ -8,15 +8,17 @@ device.
 
 ## Status
 
-| Area                                              | State                                                    |
-| ------------------------------------------------- | -------------------------------------------------------- |
-| CPU (SM83), interrupts, HALT bug, timers, OAM DMA | Passes Blargg `cpu_instrs`, `instr_timing`, `mem_timing` |
-| PPU (scanline renderer, window, sprites, STAT)    | Passes `dmg-acid2`                                       |
-| Cartridges                                        | ROM only, MBC1, MBC2, MBC3 (with RTC), MBC5              |
-| Input                                             | Keyboard, multitouch on-screen buttons, gamepads         |
-| Battery saves, save states                        | Kept on the device; `.sav` import/export; auto-resume    |
-| Sound (two pulse, wave, noise; AudioWorklet)      | Passes all 12 Blargg `dmg_sound` tests                   |
-| Debugger, PWA                                     | Not yet (milestone 8)                                    |
+| Area                                              | State                                                              |
+| ------------------------------------------------- | ------------------------------------------------------------------ |
+| CPU (SM83), interrupts, HALT bug, timers, OAM DMA | Passes Blargg `cpu_instrs`, `instr_timing`, `mem_timing`           |
+| PPU (scanline renderer, window, sprites, STAT)    | Passes `dmg-acid2`                                                 |
+| Timing accuracy                                   | Passes all 66 Mooneye acceptance tests for DMG ABC                 |
+| Cartridges                                        | ROM only, MBC1 (and multicarts), MBC2, MBC3 (RTC), MBC5            |
+| Input                                             | Remappable keyboard and gamepads, multitouch buttons               |
+| Battery saves, save states                        | Kept on the device; `.sav` import/export; auto-resume              |
+| Sound (two pulse, wave, noise; AudioWorklet)      | Passes all 12 Blargg `dmg_sound` tests                             |
+| Debugger                                          | Banked breakpoints, R/W watchpoints, memory editing, `.sym` labels |
+| Offline and installable (PWA)                     | Updates only when you choose; opens `.gb` files                    |
 
 See [the design document](reactboy-design-doc.md) for the full roadmap.
 
@@ -34,6 +36,7 @@ pnpm dev          # http://localhost:5173/ReactBoy/
 | `pnpm dev`                           | Start the web app with hot reload                           |
 | `pnpm build`                         | Type-check and build the site into `apps/web/dist`          |
 | `pnpm test`                          | Unit tests for every package, plus the ROM suite if present |
+| `pnpm test:e2e`                      | Playwright tests against the build (run `pnpm build` first) |
 | `pnpm fetch-roms`                    | Download the open test ROMs into `roms/test` (gitignored)   |
 | `pnpm lint`                          | ESLint                                                      |
 | `pnpm typecheck`                     | `tsc` for every package                                     |
@@ -43,8 +46,9 @@ pnpm dev          # http://localhost:5173/ReactBoy/
 
 ```
 packages/core   @reactboy/core — CPU, MMU, cartridge mappers, PPU, APU, timer, joypad,
-                serial, save states
-apps/web        @reactboy/web — React UI, worker host, input, canvas, audio, storage
+                serial, save states, debugger
+apps/web        @reactboy/web — React UI, worker host, input, canvas, audio, storage,
+                debugger views, service worker; e2e/ holds the Playwright tests
 scripts         fetch-test-roms.mjs
 ```
 
@@ -74,18 +78,42 @@ save, so a stale state never rolls back an in-game save. `.sav` files use the co
 including the 48-byte MBC3 clock block, so they move to and from other emulators. MBC3
 clocks catch up on real time that passed between sessions.
 
+Keys are remappable in the panel. F1–F3 load a save state and Shift+F1–F3 save one, as in
+mGBA and VBA, and P pauses.
+
+The debugger (**Open debugger** in the panel) is loaded on demand and takes the panel's
+place. It shows registers, flags, interrupts, the stack and a disassembly around PC, with
+breakpoints, write watchpoints, step, step over, step out and frame stepping. Viewers cover
+all 64 KiB of memory, VRAM tiles, both tile maps with the scroll and window outlined,
+sprites, and the hardware registers with their bits spelled out. The core's `Debugger`
+reads memory through `GameBoy.peek()`, which has no side effects and sees VRAM and OAM even
+while the PPU blocks them. Breakpoint checks only run while the debugger is open.
+
+A service worker precaches the whole app, so after the first visit ReactBoy works offline
+and can be installed. When a new version is downloaded it waits: the player chooses when to
+update, and the running game is saved and reopened around the reload. The installed app
+opens `.gb` files from the operating system where the browser supports it (Chromium).
+
 ## Testing
 
 `pnpm fetch-roms && pnpm test` runs, headlessly in Node:
 
 - Blargg's `cpu_instrs` (all 11), `instr_timing` and `mem_timing`, which report over the
   serial port, and `dmg_sound` (all 12), which reports in cartridge RAM
+- the Mooneye Test Suite: every acceptance test that applies to a DMG ABC (66; the rest are
+  for other models) and the 28 MBC1/2/5 tests
 - `dmg-acid2`, compared pixel for pixel with its reference image
-- unit tests for the CPU, timer, PPU timing, APU output, joypad, mappers, disassembler and
-  save states, plus the web app's storage, audio queue and save flows
+- unit tests for the CPU, timer, PPU timing, OAM DMA, serial, APU output, joypad, mappers, disassembler,
+  debugger and save states, plus the web app's storage, audio queue, save flows, debugger
+  views and symbol files, key and gamepad bindings and update flow
 
-CI runs lint, formatting, type checks, all tests and the build on every push and pull
-request, then deploys `master` to GitHub Pages.
+`pnpm build && pnpm test:e2e` runs Playwright in Chromium against the production build. It
+checks that `dmg-acid2` reaches the canvas pixel for pixel, that keyboard, remapped keys and
+touch reach the game, saving and resuming across a reload, breakpoints and stepping, and
+offline use.
+
+CI runs lint, formatting, type checks, all tests, the build and the end-to-end tests on
+every push and pull request, then deploys `master` to GitHub Pages.
 
 ## Legal
 

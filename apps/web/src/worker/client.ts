@@ -3,17 +3,22 @@ import {
   FRAME_RATE,
   SCREEN_HEIGHT,
   SCREEN_WIDTH,
+  type Breakpoint,
+  type BreakReason,
   type ButtonId,
   type CartridgeHeader,
+  type DebugSnapshot,
   type Palette,
+  type StepMode,
+  type Watchpoint,
 } from '@reactboy/core';
 import { AudioOutput } from '../audio/output';
-import { GAMEPAD_BUTTONS, type InputSource } from '../input/buttons';
+import { DEFAULT_PADMAP, type InputSource } from '../input/buttons';
 import { openStore } from '../storage/idb';
 import { romKey } from '../storage/rom-key';
-import type { GameStore, ManualSlot, RecentGame, StateInfo } from '../storage/store';
+import type { GameStore, ManualSlot, RecentGame, StateInfo, StoredSymbols } from '../storage/store';
 import { createEmulatorHost } from './host';
-import type { ClientMessage, HostMessage, Post } from './protocol';
+import type { ClientMessage, DebugReport, HostMessage, Post } from './protocol';
 
 export type EmulatorStatus = 'empty' | 'running' | 'paused' | 'error';
 
@@ -52,6 +57,23 @@ export interface EmulatorState {
   sound: SoundStatus;
 }
 
+/** The debugger's view, kept apart from {@link EmulatorState} so only it re-renders. */
+export interface DebugState {
+  open: boolean;
+  /** The latest inspection: on every stop and step, and ~10 times a second while running. */
+  snapshot: DebugSnapshot | null;
+  /** The inspection before it, to highlight what changed. */
+  previous: DebugSnapshot | null;
+  /** Why the machine last stopped by itself; cleared when it runs again. */
+  stop: BreakReason | null;
+  breakpoints: Breakpoint[];
+  watchpoints: Watchpoint[];
+  /** The current game's symbol file, if one was loaded for it. */
+  symbols: StoredSymbols | null;
+  /** A step over or out is running. */
+  stepping: boolean;
+}
+
 export interface EmulatorClientOptions {
   /** Where games and saves are kept; the device's IndexedDB by default. */
   store?: GameStore | Promise<GameStore>;
@@ -62,6 +84,25 @@ const MAX_CATCH_UP = 4;
 /** How often a running game refreshes its resume state, as a backstop for crashes. */
 const AUTOSAVE_MS = 60_000;
 const NOTICE_MS = 5_000;
+/** How often the debugger refreshes while the game runs. */
+const INSPECT_MS = 100;
+
+const hex4 = (v: number) => '$' + v.toString(16).toUpperCase().padStart(4, '0');
+const hex2 = (v: number) => '$' + v.toString(16).toUpperCase().padStart(2, '0');
+
+/** A stop, in words for the status line. */
+export function describeStop(stop: BreakReason): string {
+  switch (stop.type) {
+    case 'breakpoint':
+      return `Stopped at breakpoint ${hex4(stop.pc)}.`;
+    case 'watchpoint':
+      return stop.access === 'write'
+        ? `Stopped: ${hex4(stop.at)} wrote ${hex2(stop.value)} to ${hex4(stop.addr)}.`
+        : `Stopped: ${hex4(stop.at)} read ${hex2(stop.value)} from ${hex4(stop.addr)}.`;
+    case 'step':
+      return `Stopped at ${hex4(stop.pc)}.`;
+  }
+}
 
 /**
  * The UI's handle on the emulator. Owns the worker, paces frames from requestAnimationFrame,
@@ -72,6 +113,18 @@ const NOTICE_MS = 5_000;
 export class EmulatorClient {
   private state: EmulatorState;
   private readonly listeners = new Set<() => void>();
+  private debugState: DebugState = {
+    open: false,
+    snapshot: null,
+    previous: null,
+    stop: null,
+    breakpoints: [],
+    watchpoints: [],
+    symbols: null,
+    stepping: false,
+  };
+  private readonly debugListeners = new Set<() => void>();
+  private lastInspect = 0;
   private readonly send: Post<ClientMessage>;
   private readonly worker: Worker | null;
   private readonly store: Promise<GameStore>;
@@ -94,6 +147,10 @@ export class EmulatorClient {
   /** Per-button bitmask of the sources holding it. */
   private readonly held = new Map<ButtonId, number>();
   private readonly gamepadHeld = new Set<ButtonId>();
+  /** The gamepad layout as [button index, game button] pairs. */
+  private padmap = padEntries(DEFAULT_PADMAP);
+  /** Gamepads are being read for something else (binding a button), not the game. */
+  private gamepadSuspended = false;
 
   private nextRequest = 1;
   private readonly requests = new Map<number, (reply: Reply) => void>();
@@ -157,6 +214,18 @@ export class EmulatorClient {
     this.listeners.forEach((listener) => listener());
   }
 
+  subscribeDebug = (listener: () => void): (() => void) => {
+    this.debugListeners.add(listener);
+    return () => this.debugListeners.delete(listener);
+  };
+
+  getDebugSnapshot = (): DebugState => this.debugState;
+
+  private updateDebug(patch: Partial<DebugState>): void {
+    this.debugState = { ...this.debugState, ...patch };
+    this.debugListeners.forEach((listener) => listener());
+  }
+
   private notify(notice: string): void {
     clearTimeout(this.noticeTimer);
     this.update({ notice });
@@ -191,6 +260,7 @@ export class EmulatorClient {
 
   play(): void {
     if (this.state.status !== 'paused') return;
+    if (this.debugState.stop) this.updateDebug({ stop: null });
     this.update({ status: 'running' });
     this.startLoop();
     this.syncAudio();
@@ -198,10 +268,21 @@ export class EmulatorClient {
 
   pause(): void {
     if (this.state.status !== 'running') return;
+    this.halt();
+    // The last inspection may be up to 100 ms old.
+    if (this.debugState.open) this.redraw();
+  }
+
+  /** Pauses where the game is, e.g. at a breakpoint. */
+  private halt(): void {
     this.update({ status: 'paused', fps: 0 });
     this.stopLoop();
     this.syncAudio();
     this.releaseAll();
+    if (this.debugState.stepping) {
+      this.send({ type: 'cancel-step' });
+      this.updateDebug({ stepping: false });
+    }
     void this.persist();
   }
 
@@ -214,7 +295,60 @@ export class EmulatorClient {
   stepFrame(): void {
     if (this.state.status !== 'paused' || this.inFlight) return;
     this.inFlight = true;
-    this.send({ type: 'run', frames: 1 });
+    this.send({ type: 'run', frames: 1, inspect: this.debugState.open });
+  }
+
+  // --- Debugger -------------------------------------------------------------------------
+
+  /** Opening the debugger arms its breakpoints; closing it returns to full speed. */
+  setDebuggerOpen(open: boolean): void {
+    if (open === this.debugState.open) return;
+    this.updateDebug({
+      open,
+      stop: null,
+      stepping: false,
+      ...(!open && { snapshot: null, previous: null }),
+    });
+    this.syncDebugger();
+    this.redraw();
+  }
+
+  setBreakpoints(breakpoints: Breakpoint[]): void {
+    this.updateDebug({ breakpoints });
+    this.syncDebugger();
+  }
+
+  setWatchpoints(watchpoints: Watchpoint[]): void {
+    this.updateDebug({ watchpoints });
+    this.syncDebugger();
+  }
+
+  /** Edits memory while paused; see GameBoy.poke for what can be changed. */
+  poke(addr: number, value: number): void {
+    if (!this.debugState.open || this.state.status !== 'paused' || this.inFlight) return;
+    this.inFlight = true;
+    this.send({ type: 'poke', addr, value });
+  }
+
+  /** Keeps a symbol file for the current game (null forgets it). */
+  async setSymbols(symbols: StoredSymbols | null): Promise<void> {
+    const id = this.state.gameId;
+    if (!id) return;
+    this.updateDebug({ symbols });
+    await this.useStore((store) => store.putSymbols(id, symbols));
+  }
+
+  /** Steps the paused machine. Over and out may run on until the routine returns. */
+  debugStep(mode: StepMode): void {
+    if (!this.debugState.open || this.state.status !== 'paused' || this.inFlight) return;
+    this.inFlight = true;
+    this.updateDebug({ stop: null });
+    this.send({ type: 'step', mode });
+  }
+
+  private syncDebugger(): void {
+    const { open, breakpoints, watchpoints } = this.debugState;
+    this.send({ type: 'debug', enabled: open, breakpoints, watchpoints });
   }
 
   setSpeed(speed: number): void {
@@ -300,7 +434,8 @@ export class EmulatorClient {
     const id = this.state.gameId;
     if (!id) return;
     const saved = await this.useStore((store) => store.getState(id, slot));
-    if (!saved || this.state.gameId !== id) return;
+    if (this.state.gameId !== id) return;
+    if (!saved) return this.notify(`Slot ${slot} is empty.`);
     try {
       await this.request((rid) => ({ type: 'restore', id: rid, state: saved.data }));
       this.notify(`Loaded slot ${slot}.`);
@@ -344,9 +479,10 @@ export class EmulatorClient {
         await store.putRom(game, rom);
         this.askForPersistence();
       }
-      const slots = await store.listStates(key);
+      const [slots, symbols] = await Promise.all([store.listStates(key), store.getSymbols(key)]);
       if (this.state.gameId === key) {
         this.update({ slots: slots.filter((s) => s.slot !== 'auto') });
+        this.updateDebug({ symbols });
       }
     });
     await this.refreshRecent();
@@ -426,7 +562,7 @@ export class EmulatorClient {
   private redraw(): void {
     if (this.state.status !== 'paused') return;
     this.inFlight = true;
-    this.send({ type: 'run', frames: 0 });
+    this.send({ type: 'run', frames: 0, inspect: this.debugState.open });
   }
 
   // --- Frame loop -----------------------------------------------------------------------
@@ -459,7 +595,9 @@ export class EmulatorClient {
       const frames = Math.floor(this.due);
       this.due -= frames;
       this.inFlight = true;
-      this.send({ type: 'run', frames });
+      const inspect = this.debugState.open && now - this.lastInspect >= INSPECT_MS;
+      if (inspect) this.lastInspect = now;
+      this.send({ type: 'run', frames, inspect });
       this.framesThisSecond += frames;
     }
 
@@ -478,7 +616,9 @@ export class EmulatorClient {
 
   private receive(message: HostMessage): void {
     switch (message.type) {
-      case 'loaded':
+      case 'loaded': {
+        // A reset reloads the same game; its symbols stay.
+        const sameGame = message.key === this.state.gameId;
         this.update({
           status: 'running',
           header: message.header,
@@ -487,11 +627,19 @@ export class EmulatorClient {
           slots: [],
         });
         if (message.resumed) this.notify('Resumed where you left off.');
+        this.updateDebug({
+          snapshot: null,
+          previous: null,
+          stop: null,
+          stepping: false,
+          ...(!sameGame && { symbols: null }),
+        });
         this.audio.clear();
         this.startLoop();
         this.syncAudio();
         void this.onLoaded(message.key, message.header);
         break;
+      }
       case 'error':
         this.loading.delete(message.key);
         // A bad file while a game is loaded leaves that game running and just reports.
@@ -503,6 +651,7 @@ export class EmulatorClient {
         break;
       case 'frame':
         this.inFlight = false;
+        if (message.debug) this.inspected(message.debug);
         if (message.audio) this.audio.push(new Float32Array(message.audio));
         if (!message.pixels) break;
         if (this.canvas) {
@@ -524,14 +673,38 @@ export class EmulatorClient {
     }
   }
 
+  private inspected({ snapshot, stop, stepping }: DebugReport): void {
+    if (!this.debugState.open) return;
+    this.updateDebug({ snapshot, previous: this.debugState.snapshot, stepping, stop });
+    if (stop) {
+      if (this.state.status === 'running') this.halt();
+      this.notify(describeStop(stop));
+    } else if (stepping) {
+      this.play();
+    }
+  }
+
   // --- Input ----------------------------------------------------------------------------
 
+  /** Game buttons by gamepad button index (standard mapping). */
+  setGamepadMap(padmap: Record<string, ButtonId>): void {
+    this.padmap = padEntries(padmap);
+  }
+
+  /** While suspended, gamepad presses don't reach the game (e.g. while binding buttons). */
+  suspendGamepad(suspended: boolean): void {
+    this.gamepadSuspended = suspended;
+  }
+
   private pollGamepads(): void {
-    const pads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+    const pads =
+      typeof navigator.getGamepads === 'function' && !this.gamepadSuspended
+        ? navigator.getGamepads()
+        : [];
     const now = new Set<ButtonId>();
     for (const pad of pads) {
       if (!pad) continue;
-      for (const [index, button] of GAMEPAD_BUTTONS) {
+      for (const [index, button] of this.padmap) {
         if (pad.buttons[index]?.pressed) now.add(button);
       }
       const [x = 0, y = 0] = pad.axes;
@@ -564,6 +737,9 @@ export class EmulatorClient {
 type Reply = Extract<HostMessage, { type: 'reply' }>;
 
 const SOURCE_BITS: Record<InputSource, number> = { keyboard: 1, touch: 2, gamepad: 4 };
+
+const padEntries = (padmap: Record<string, ButtonId>): [number, ButtonId][] =>
+  Object.entries(padmap).map(([index, button]) => [Number(index), button]);
 
 const GAMEPAD_AXES = {
   up: Button.Up,

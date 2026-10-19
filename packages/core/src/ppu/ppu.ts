@@ -13,16 +13,40 @@ export const PpuMode = {
 export type PpuModeId = (typeof PpuMode)[keyof typeof PpuMode];
 
 const DOTS_PER_LINE = 456;
-const OAM_SCAN_DOTS = 80;
-/** Mode 3 length without sprite/scroll penalties; a scanline renderer doesn't model those. */
-const DRAWING_DOTS = 172;
+/**
+ * Line timing, in dots from where LY changes. STAT keeps reading mode 0, and LY=LYC false,
+ * until {@link LINE_SETTLE}, although OAM reads are blocked and the mode 2 interrupt fires
+ * from 0. Between OAM scan and mode 3 there is an M-cycle where VRAM reads are blocked but
+ * OAM writes go through. Measured by Mooneye's lcdon_timing, lcdon_write_timing and intr_2
+ * tests.
+ */
+const LINE_SETTLE = 4;
+const OAM_SCAN_END = 80;
+const DRAWING_START = 84;
+
+/** Bits of Ppu.locks: which CPU accesses to OAM and VRAM the PPU is currently blocking. */
+const OAM_READ = 1;
+const OAM_WRITE = 2;
+const VRAM_READ = 4;
+const VRAM_WRITE = 8;
+const ALL_LOCKS = OAM_READ | OAM_WRITE | VRAM_READ | VRAM_WRITE;
+/**
+ * Dot where mode 3 ends with no penalties: STAT reads see mode 0 from the first M-cycle at
+ * or after it. The HBlank interrupt is raised a dot earlier, rounded the same way, so it can
+ * land an M-cycle before the mode changes (Mooneye's intr_2_0 and hblank_ly_scx tests).
+ */
+const DRAWING_END = 253;
+const HBLANK_IRQ_LEAD = 1;
+/** Mode 3 stalls while the fetcher restarts for the window. */
+const WINDOW_PENALTY = 6;
 const LINES_PER_FRAME = 154;
 const MAX_SPRITES_PER_LINE = 10;
 
 /**
  * Pixel processing unit, rendering one scanline at a time when mode 3 begins. Mode timing,
- * LY/LYC and STAT interrupts are dot-accurate to the M-cycle; mid-scanline register writes
- * are not reflected (a pixel FIFO is a later stretch goal).
+ * LY/LYC and STAT interrupts are dot-accurate to the M-cycle, including how scrolling,
+ * sprites and the window lengthen mode 3; mid-scanline register writes are not reflected
+ * (that needs a pixel FIFO).
  */
 export class Ppu implements Stateful {
   /** 8 KiB VRAM. A CGB would add a second bank. */
@@ -45,10 +69,30 @@ export class Ppu implements Stateful {
   wx = 0;
   /** STAT bits 3-6: interrupt sources. */
   private statSources = 0;
+  /** The mode STAT reports. */
   mode: PpuModeId = PpuMode.OamScan;
 
+  /** Line being drawn. LY follows it, except that it reads 0 for most of line 153. */
+  private line = 0;
   private dot = 0;
+  private locks = OAM_READ | OAM_WRITE;
+  /** The mode 2 STAT source, which leads the mode STAT reports. */
+  private oamScanSignal = true;
+  /**
+   * The first line after the LCD is switched on: it starts 4 dots in and has no OAM scan,
+   * so it shows mode 0 until mode 3 and only locks OAM and VRAM during mode 3.
+   */
+  private lcdOnLine = false;
+  /**
+   * STAT interrupt line and LY=LYC flag. Both only update while the LCD is on, so they
+   * keep their values through an LCD-off period.
+   */
   private statLine = false;
+  private lyCompare = false;
+  /** Dots this line's mode 3 runs past {@link DRAWING_END}, set when it starts. */
+  private drawingPenalty = 0;
+  /** The HBlank STAT source, which turns on slightly before mode 0 itself. */
+  private hblankSignal = false;
   /** Set once LY == WY during a frame; the window can only appear after that. */
   private windowTriggered = false;
   /** Internal window line counter: advances only on lines where the window was drawn. */
@@ -81,47 +125,125 @@ export class Ppu implements Stateful {
     return (this.lcdc & 0x80) !== 0;
   }
 
-  vramAccessible(): boolean {
-    return !this.lcdOn || this.mode !== PpuMode.Drawing;
+  vramReadable(): boolean {
+    return (this.locks & VRAM_READ) === 0;
   }
 
-  oamAccessible(): boolean {
-    return !this.lcdOn || this.mode < PpuMode.OamScan;
+  vramWritable(): boolean {
+    return (this.locks & VRAM_WRITE) === 0;
+  }
+
+  oamReadable(): boolean {
+    return (this.locks & OAM_READ) === 0;
+  }
+
+  oamWritable(): boolean {
+    return (this.locks & OAM_WRITE) === 0;
   }
 
   /** Advances one M-cycle (4 dots). */
   tick(): void {
     if (!this.lcdOn) return;
     this.dot += 4;
-    if (this.ly < SCREEN_HEIGHT) {
-      if (this.dot === OAM_SCAN_DOTS) {
-        this.setMode(PpuMode.Drawing);
-        this.renderLine();
-      } else if (this.dot === OAM_SCAN_DOTS + DRAWING_DOTS) {
-        this.setMode(PpuMode.HBlank);
-      }
+    if (this.dot === DOTS_PER_LINE) {
+      this.dot = 0;
+      this.startLine((this.line + 1) % LINES_PER_FRAME);
+    } else if (this.line < SCREEN_HEIGHT) {
+      this.visibleLineTick();
+    } else if (this.line === LINES_PER_FRAME - 1) {
+      this.lastLineTick();
+    } else if (this.dot === LINE_SETTLE) {
+      this.compareLy();
     }
-    if (this.dot < DOTS_PER_LINE) return;
+  }
 
-    this.dot = 0;
-    this.ly = (this.ly + 1) % LINES_PER_FRAME;
-    if (this.ly === SCREEN_HEIGHT) {
+  private startLine(line: number): void {
+    this.line = line;
+    this.lcdOnLine = false;
+    if (line === 0) {
+      // LY has read 0 since early in line 153, so there's no settling here.
+      this.windowTriggered = false;
+      this.windowLine = 0;
+      this.locks = OAM_READ;
+      this.oamScanSignal = true;
+      this.setMode(PpuMode.OamScan);
+      return;
+    }
+    this.ly = line;
+    this.lyCompare = false;
+    if (line < SCREEN_HEIGHT) {
+      this.locks = OAM_READ;
+      this.oamScanSignal = true;
+      this.updateStatLine();
+    } else if (line === SCREEN_HEIGHT) {
+      // On a DMG the mode 2 source also fires as VBlank starts, as if line 144 began an
+      // OAM scan.
+      this.oamScanSignal = true;
+      this.updateStatLine();
+      this.oamScanSignal = false;
       this.setMode(PpuMode.VBlank);
       this.interrupts.request(Interrupt.VBlank);
       this.presentFrame();
-    } else if (this.ly < SCREEN_HEIGHT) {
-      if (this.ly === 0) {
-        this.windowTriggered = false;
-        this.windowLine = 0;
-      }
-      this.setMode(PpuMode.OamScan);
     } else {
       this.updateStatLine();
     }
   }
 
+  private visibleLineTick(): void {
+    const dot = this.dot;
+    if (dot === LINE_SETTLE) {
+      this.locks |= OAM_WRITE;
+      this.compareLy();
+      if (this.mode === PpuMode.HBlank) this.setMode(PpuMode.OamScan);
+    } else if (dot === OAM_SCAN_END && !this.lcdOnLine) {
+      this.locks = OAM_READ | VRAM_READ;
+    } else if (dot === DRAWING_START) {
+      this.locks = ALL_LOCKS;
+      this.oamScanSignal = false;
+      this.setMode(PpuMode.Drawing);
+      this.renderLine();
+    } else if (this.mode === PpuMode.Drawing) {
+      const end = DRAWING_END + this.drawingPenalty;
+      if (!this.hblankSignal && dot >= end - HBLANK_IRQ_LEAD) {
+        this.hblankSignal = true;
+        this.updateStatLine();
+      }
+      if (dot >= end) {
+        this.locks = 0;
+        this.setMode(PpuMode.HBlank);
+      }
+    }
+  }
+
+  /**
+   * Line 153: LY reads 153 for one M-cycle, then 0. The LY=LYC flag compares against 153
+   * and then, after a gap, against 0, so LYC=0 matches here rather than on line 0.
+   */
+  private lastLineTick(): void {
+    switch (this.dot) {
+      case 4:
+        this.lyCompare = this.lyc === this.line;
+        this.ly = 0;
+        break;
+      case 8:
+        this.lyCompare = false;
+        break;
+      case 12:
+        this.lyCompare = this.lyc === 0;
+        break;
+      default:
+        return;
+    }
+    this.updateStatLine();
+  }
+
+  private compareLy(): void {
+    this.lyCompare = this.ly === this.lyc;
+    this.updateStatLine();
+  }
+
   readStat(): number {
-    const coincidence = this.ly === this.lyc ? 0x04 : 0;
+    const coincidence = this.lyCompare ? 0x04 : 0;
     return 0x80 | this.statSources | coincidence | (this.lcdOn ? this.mode : 0);
   }
 
@@ -135,29 +257,29 @@ export class Ppu implements Stateful {
     this.lcdc = value;
     if (wasOn && !this.lcdOn) {
       // Turning the LCD off resets the PPU and blanks the screen.
-      this.ly = 0;
-      this.dot = 0;
+      this.ly = this.line = this.dot = 0;
       this.mode = PpuMode.HBlank;
-      this.statLine = false;
+      this.locks = 0;
+      this.oamScanSignal = this.hblankSignal = false;
       this.backShades.fill(0);
       this.presentFrame();
     } else if (!wasOn && this.lcdOn) {
-      // The first line after power-on skips OAM scan: it starts in mode 0.
-      this.dot = 0;
-      this.mode = PpuMode.HBlank;
+      this.dot = 4;
+      this.lcdOnLine = true;
       this.windowTriggered = false;
       this.windowLine = 0;
-      this.updateStatLine();
+      this.compareLy();
     }
   }
 
   writeLyc(value: number): void {
     this.lyc = value;
-    this.updateStatLine();
+    if (this.lcdOn) this.compareLy();
   }
 
   private setMode(mode: PpuModeId): void {
     this.mode = mode;
+    if (mode !== PpuMode.HBlank) this.hblankSignal = false;
     this.updateStatLine();
   }
 
@@ -166,10 +288,10 @@ export class Ppu implements Stateful {
     if (!this.lcdOn) return;
     const s = this.statSources;
     const line =
-      ((s & 0x40) !== 0 && this.ly === this.lyc) ||
-      ((s & 0x08) !== 0 && this.mode === PpuMode.HBlank) ||
+      ((s & 0x40) !== 0 && this.lyCompare) ||
+      ((s & 0x08) !== 0 && (this.mode === PpuMode.HBlank || this.hblankSignal)) ||
       ((s & 0x10) !== 0 && this.mode === PpuMode.VBlank) ||
-      ((s & 0x20) !== 0 && this.mode === PpuMode.OamScan);
+      ((s & 0x20) !== 0 && this.oamScanSignal);
     if (line && !this.statLine) this.interrupts.request(Interrupt.Stat);
     this.statLine = line;
   }
@@ -191,8 +313,15 @@ export class Ppu implements Stateful {
     w.u8(this.wx);
     w.u8(this.statSources);
     w.u8(this.mode);
+    w.u8(this.line);
     w.u16(this.dot);
+    w.u8(this.locks);
+    w.bool(this.oamScanSignal);
+    w.bool(this.lcdOnLine);
     w.bool(this.statLine);
+    w.bool(this.lyCompare);
+    w.bool(this.hblankSignal);
+    w.u8(this.drawingPenalty);
     w.bool(this.windowTriggered);
     w.u8(this.windowLine);
     w.u32(this.frameCount);
@@ -215,8 +344,15 @@ export class Ppu implements Stateful {
     this.wx = r.u8();
     this.statSources = r.u8() & 0x78;
     this.mode = (r.u8() & 3) as PpuModeId;
+    this.line = r.u8();
     this.dot = r.u16();
+    this.locks = r.u8() & ALL_LOCKS;
+    this.oamScanSignal = r.bool();
+    this.lcdOnLine = r.bool();
     this.statLine = r.bool();
+    this.lyCompare = r.bool();
+    this.hblankSignal = r.bool();
+    this.drawingPenalty = r.u8();
     this.windowTriggered = r.bool();
     this.windowLine = r.u8();
     this.frameCount = r.u32();
@@ -237,6 +373,7 @@ export class Ppu implements Stateful {
   private renderLine(): void {
     const { lcdc, ly, bgIndex } = this;
     if (!this.windowTriggered && ly === this.wy) this.windowTriggered = true;
+    let penalty = this.scx & 7;
 
     // DMG: LCDC bit 0 off blanks both background and window to color 0.
     if (lcdc & 0x01) {
@@ -251,13 +388,15 @@ export class Ppu implements Stateful {
         const start = Math.max(0, windowStart);
         this.fetchTiles((lcdc & 0x40) !== 0, this.windowLine, start, SCREEN_WIDTH, -windowStart);
         this.windowLine++;
+        penalty += WINDOW_PENALTY;
       }
     } else {
       bgIndex.fill(0);
     }
 
     this.objColor.fill(0);
-    if (lcdc & 0x02) this.renderSprites();
+    if (lcdc & 0x02) penalty += this.renderSprites();
+    this.drawingPenalty = penalty;
 
     const shades = this.backShades;
     const row = ly * SCREEN_WIDTH;
@@ -297,7 +436,8 @@ export class Ppu implements Stateful {
     }
   }
 
-  private renderSprites(): void {
+  /** Draws this line's sprites; returns how many dots fetching them adds to mode 3. */
+  private renderSprites(): number {
     const { oam, vram, ly } = this;
     const height = this.lcdc & 0x04 ? 16 : 8;
     const sprites = this.lineSprites;
@@ -306,9 +446,10 @@ export class Ppu implements Stateful {
       const top = oam[i * 4]! - 16;
       if (ly >= top && ly < top + height) sprites.push(i);
     }
-    // DMG priority: smaller X wins, then lower OAM index. Draw lowest priority first so
-    // the winner's opaque pixels end up on top.
+    // DMG priority: smaller X wins, then lower OAM index. That is also the order they are
+    // fetched in. Draw lowest priority first so the winner's opaque pixels end up on top.
     sprites.sort((a, b) => oam[a * 4 + 1]! - oam[b * 4 + 1]! || a - b);
+    const penalty = this.spritePenalty();
     for (let s = sprites.length - 1; s >= 0; s--) {
       const base = sprites[s]! * 4;
       const left = oam[base + 1]! - 8;
@@ -329,5 +470,29 @@ export class Ppu implements Stateful {
         this.objAttr[x] = attr;
       }
     }
+    return penalty;
+  }
+
+  /**
+   * Pan Docs' model: 6 dots per sprite fetched, plus up to 5 more while the background
+   * fetch of the tile under the sprite's left edge finishes, once per tile. Sprites past the
+   * right edge (X >= 168) aren't fetched. Expects {@link lineSprites} in fetch order.
+   */
+  private spritePenalty(): number {
+    const { oam, lineSprites } = this;
+    const fineScroll = this.scx & 7;
+    let penalty = 0;
+    let lastTile = -1;
+    for (const sprite of lineSprites) {
+      const x = oam[sprite * 4 + 1]!;
+      if (x >= SCREEN_WIDTH + 8) continue;
+      penalty += 6;
+      const tile = (x + fineScroll) >> 3;
+      if (tile !== lastTile) {
+        penalty += Math.max(0, 5 - ((x + fineScroll) & 7));
+        lastTile = tile;
+      }
+    }
+    return penalty;
   }
 }

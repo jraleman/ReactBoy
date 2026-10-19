@@ -13,6 +13,8 @@ export interface Mbc extends Stateful {
   writeRam(addr: number, value: number): void;
   /** Battery-backed RAM contents (empty when the cartridge has none). */
   readonly ram: Uint8Array;
+  /** The ROM bank mapped at 0x4000-0x7FFF, as selected (for debuggers). */
+  readonly romBank: number;
   /** The cartridge's real-time clock (MBC3 only). */
   readonly rtc?: Rtc | undefined;
 }

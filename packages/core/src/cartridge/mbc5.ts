@@ -4,7 +4,7 @@ import { type Mbc, ramBankOffset, romBankOffset } from './mbc';
 /** MBC5: up to 8 MiB ROM (9-bit bank number) / 128 KiB RAM. */
 export class Mbc5 implements Mbc {
   private ramEnabled = false;
-  private romBank = 1;
+  romBank = 1;
   private ramBank = 0;
 
   constructor(

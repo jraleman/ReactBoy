@@ -3,6 +3,8 @@ import type { Mbc } from './mbc';
 
 /** ROM-only cartridges, optionally with up to 8 KiB of unbanked RAM. */
 export class Mbc0 implements Mbc {
+  readonly romBank = 1;
+
   constructor(
     private readonly rom: Uint8Array,
     readonly ram: Uint8Array,

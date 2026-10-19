@@ -8,16 +8,19 @@ import {
   type StateInfo,
   type StoredBattery,
   type StoredState,
+  type StoredSymbols,
 } from './store';
 
 const DB_NAME = 'reactboy';
-const DB_VERSION = 1;
+/** 1: games, batteries and states. 2: debugger symbols. */
+const DB_VERSION = 2;
 
 /** Object stores. ROM bytes live apart from their metadata so listing games stays cheap. */
 const LIBRARY = 'library';
 const ROMS = 'roms';
 const BATTERIES = 'batteries';
 const STATES = 'states';
+const SYMBOLS = 'symbols';
 
 interface StateRecord extends StoredState {
   id: string;
@@ -38,12 +41,15 @@ const completion = (tx: IDBTransaction) =>
 export function openDatabase(factory: IDBFactory = indexedDB): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = factory.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
-      db.createObjectStore(LIBRARY, { keyPath: 'id' });
-      db.createObjectStore(ROMS);
-      db.createObjectStore(BATTERIES);
-      db.createObjectStore(STATES, { keyPath: ['id', 'slot'] });
+      if (event.oldVersion < 1) {
+        db.createObjectStore(LIBRARY, { keyPath: 'id' });
+        db.createObjectStore(ROMS);
+        db.createObjectStore(BATTERIES);
+        db.createObjectStore(STATES, { keyPath: ['id', 'slot'] });
+      }
+      if (event.oldVersion < 2) db.createObjectStore(SYMBOLS);
     };
     request.onsuccess = () => {
       const db = request.result;
@@ -120,6 +126,18 @@ export class IdbStore implements GameStore {
     const range = IDBKeyRange.bound([id, ''], [id, '￿']);
     const records = await result(this.store(STATES).getAll(range) as IDBRequest<StateRecord[]>);
     return records.map(({ slot, created, thumbnail }) => ({ slot, created, thumbnail }));
+  }
+
+  async getSymbols(id: string): Promise<StoredSymbols | null> {
+    const request = this.store(SYMBOLS).get(id) as IDBRequest<StoredSymbols | undefined>;
+    return (await result(request)) ?? null;
+  }
+
+  async putSymbols(id: string, symbols: StoredSymbols | null): Promise<void> {
+    const tx = this.db.transaction(SYMBOLS, 'readwrite');
+    if (symbols) tx.objectStore(SYMBOLS).put(symbols, id);
+    else tx.objectStore(SYMBOLS).delete(id);
+    await completion(tx);
   }
 
   private store(name: string): IDBObjectStore {

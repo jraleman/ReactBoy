@@ -13,22 +13,30 @@ export class OamDma implements Stateful {
     private readonly oam: Uint8Array,
   ) {}
 
+  /**
+   * After the write there is one M-cycle of setup, then one byte is copied per M-cycle. OAM
+   * is blocked from the first copy through the M-cycle after the last. A restart keeps it
+   * blocked through the new setup cycle.
+   */
   start(value: number): void {
     this.register = value;
     // Sources above 0xDFFF read from the echo of work RAM.
     this.source = (value >= 0xe0 ? value - 0x20 : value) << 8;
     this.index = 0;
-    this.startDelay = 1;
+    this.startDelay = 2;
   }
 
   tick(): void {
     if (this.startDelay > 0) {
-      if (--this.startDelay === 0) this.active = true;
+      if (--this.startDelay > 0) return;
+      this.active = true;
+    } else if (!this.active) return;
+    if (this.index === this.oam.length) {
+      this.active = false;
       return;
     }
-    if (!this.active) return;
     this.oam[this.index] = this.read(this.source + this.index);
-    if (++this.index === this.oam.length) this.active = false;
+    this.index++;
   }
 
   writeState(w: StateWriter): void {

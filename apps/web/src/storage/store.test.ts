@@ -72,11 +72,45 @@ describe.each(stores)('%s', (_, create) => {
     expect(new Uint8Array(slot1!.data)).toEqual(new Uint8Array([4]));
     expect(await store.getState('a', '2')).toBeNull();
   });
+
+  it('keeps one symbol file per game until it is cleared', async () => {
+    const store = await create();
+    expect(await store.getSymbols('a')).toBeNull();
+    await store.putSymbols('a', { name: 'a.sym', text: '00:0150 Main' });
+    await store.putSymbols('b', { name: 'b.sym', text: '00:0150 Start' });
+    expect(await store.getSymbols('a')).toEqual({ name: 'a.sym', text: '00:0150 Main' });
+    await store.putSymbols('a', null);
+    expect(await store.getSymbols('a')).toBeNull();
+    expect((await store.getSymbols('b'))?.name).toBe('b.sym');
+  });
 });
 
 describe('openStore', () => {
   it('uses IndexedDB when it opens', async () => {
     expect((await openStore(new IDBFactory())).persistent).toBe(true);
+  });
+
+  it('upgrades a database from before symbols were stored, keeping its saves', async () => {
+    const factory = new IDBFactory();
+    await new Promise<void>((resolve, reject) => {
+      const request = factory.open('reactboy', 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        db.createObjectStore('library', { keyPath: 'id' });
+        db.createObjectStore('roms');
+        db.createObjectStore('batteries').put({ data: bytes(7), updated: 1 }, 'a');
+        db.createObjectStore('states', { keyPath: ['id', 'slot'] });
+      };
+      request.onsuccess = () => {
+        request.result.close();
+        resolve();
+      };
+      request.onerror = () => reject(request.error);
+    });
+    const store = new IdbStore(await openDatabase(factory));
+    expect((await store.getBattery('a'))?.updated).toBe(1);
+    await store.putSymbols('a', { name: 'a.sym', text: '00:0150 Main' });
+    expect((await store.getSymbols('a'))?.name).toBe('a.sym');
   });
 
   it('falls back to memory when IndexedDB refuses to open', async () => {

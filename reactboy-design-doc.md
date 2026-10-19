@@ -224,7 +224,7 @@ CI gate: lint, typecheck, unit, headless ROM suite, build.
 | 6 | **MBC3/5, saves, save states** | Battery saves, IndexedDB, state slots | 3–5 days |
 | 7 | **APU + AudioWorklet** | Sound with A/V sync | 1–2 weeks |
 | 8 | **Debugger + PWA + polish** | Dev tools, offline, settings | 1 week |
-| 9 | **Accuracy stretch** | OAM DMA timing, PPU FIFO, Mooneye pass rate | open-ended |
+| 9 | **Accuracy stretch** | OAM DMA timing, PPU FIFO, Mooneye pass rate (all 94 pass; FIFO open) | open-ended |
 
 Milestones 3–5 are the critical path to a usable emulator; 6–8 can be parallelized.
 
@@ -355,12 +355,139 @@ save-state slots plus an automatic resume state, and do M6 before M7.
   1.5 ms/frame for `dmg-acid2` (was 1.3), with or without 48 kHz output. The benchmark now
   includes the audio case.
 
+### Milestone 8: done (2026-10-19)
+
+Decisions made before starting: cover the debugger, PWA, input polish and Playwright E2E in
+one round; make the debugger available to everyone on the live site, lazy-loaded behind a
+panel button; go to the full depth of section 6.3; and have updates prompt the player and
+never reload mid-game.
+
+- **Debugger core:** `Debugger` in `packages/core/src/debug.ts` wraps a `GameBoy` with PC
+  breakpoints, write watchpoints (via an `onWrite` hook that is null otherwise), step into,
+  step over (CALL/RST, recursion-safe by also checking SP) and step out (a return that pops
+  past the routine's frame). Its `runFrame` replaces the machine's while it is attached, so
+  normal play pays nothing; the benchmark is unchanged. Continuing from a stop runs the
+  instruction there rather than stopping on it again. `GameBoy.peek()` reads memory without
+  side effects: VRAM and OAM regardless of PPU mode or DMA, and APU registers without
+  catching the channels up or applying the wave-RAM access rules. Breakpoints match a CPU
+  address in whatever bank is mapped.
+- **Debugger plumbing:** the worker attaches a debugger only while the panel is open. With a
+  frame it can send a snapshot (registers, CPU state, ROM bank and all 64 KiB via `peek`):
+  on every stop and step, and about 10 times a second while running. The client keeps
+  debugger state in its own `useSyncExternalStore` store, so those updates re-render only
+  the debugger. A breakpoint pauses the game like the Pause button, including the resume
+  state.
+- **Debugger UI:** it takes over the panel's column, so the screen stays in view while
+  stepping. Tabs: CPU (registers with changes highlighted, flags, IE/IF, stack, a
+  disassembly that decodes backwards by finding a start point that lands on PC, breakpoint
+  gutter, breakpoint and watchpoint lists), Memory (a virtualized hex view of the address
+  space with region shortcuts, change highlighting and a stop-on-write toggle), Tiles,
+  Background (either map, through BGP, with the scroll viewport and window outlined),
+  Sprites (OAM with previews through OBP0/1 and flips) and I/O (every register with its bits
+  in words, palettes as swatches, wave RAM). It is a 24 KB chunk loaded on first open.
+- **Input:** the keymap lives in the settings and can be edited in the panel: press a key to
+  bind it to a button, moving it from another if needed; Escape cancels. F1–F3 load a save
+  state, Shift+F1–F3 save one (the mGBA/VBA convention) and P pauses; those keys plus Tab and
+  Escape can't be bound. Settings from localStorage are validated field by field.
+- **PWA:** `vite-plugin-pwa` (generateSW) precaches the whole build, including the worker,
+  the audio worklet and fonts, about 870 KiB. Updates use `registerType: 'prompt'`: a banner
+  offers the new version, and accepting it pauses, stores the resume state and reloads into
+  the same game. "Later" leaves the new version to install the next time the app starts.
+  The manifest has maskable icons and a `.gb`/`.gbc` file handler served through the launch
+  queue.
+- **E2E:** Playwright in Chromium against `vite preview` of the production build, in CI after
+  the build and before deploy. It checks `dmg-acid2` pixel for pixel on the canvas;
+  keyboard, remapped keys and touch input, using a generated ROM that turns the screen dark
+  while A is held; save-state shortcuts and resuming after a reload; breakpoints and stepping
+  in the debugger; and loading a game offline after the first visit. The update prompt is
+  covered by a unit test, because an end-to-end test would need two builds.
+
+### Milestone 9: Mooneye pass (2026-10-19)
+
+Scope agreed before starting: add the Mooneye acceptance suite to the ROM tests, fix what is
+practical, and record what is left. A pixel FIFO was left out.
+
+- **Suite:** `fetch-test-roms.mjs` downloads Mooneye build `mts-20260714-0944-31510e1`
+  (the project only publishes whole-suite archives, so the script reads the `.tar.gz` itself)
+  and keeps `acceptance/` and the MBC tests. `test/roms/mooneye.test.ts` runs every test that
+  applies to a DMG ABC without a boot ROM: unsuffixed, or suffixed with a `G` or `dmgABC`
+  model. A test ends at `LD B,B` and passes when B-L hold the Fibonacci numbers 3-34.
+- **Result:** from 64 of 94 to all 94 (66 acceptance, 28 MBC). The fixes, each found by
+  instrumenting the failing ROM:
+  - **OAM DMA** was a cycle early at both ends: the M-cycle after the write is setup, with
+    OAM still free, and OAM stays blocked through the M-cycle after the last copy. This
+    alone fixed 16 tests, mostly the CPU `*_timing` ones, which use DMA to observe pushes.
+  - **TAC writes** take effect before the counter advances in their M-cycle, so enabling
+    the timer on the cycle its bit falls counts that edge (`rapid_toggle`). `Timer.tick`
+    still runs first; `writeTac` makes up the difference using the counter's previous value.
+  - **PPU line timing** follows `lcdon_timing`'s table: LY changes at dot 0, but STAT reads
+    mode 0 and LY=LYC reads false until dot 4, while OAM reads are already blocked and the
+    mode 2 interrupt fires. VRAM reads block at dot 80 and mode 3 shows at 84. OAM and VRAM
+    writes have their own windows (`lcdon_write_timing`), so the PPU keeps four lock bits.
+    The first line after the LCD turns on starts 4 dots in and has no OAM scan.
+  - **Mode 3 length** is 253 dots + (SCX mod 8) + 6 for the window + Pan Docs' sprite
+    penalties, rounded up to the M-cycle. The HBlank interrupt is raised a dot earlier,
+    which `intr_2_0_timing` and `hblank_ly_scx_timing` both need. Everything is still
+    drawn in one go when mode 3 starts; only the timing moved.
+  - **STAT:** the LY=LYC flag and the interrupt line keep their values while the LCD is
+    off (`stat_lyc_onoff`), and the mode 2 source also fires at line 144 (`vblank_stat_intr`).
+  - **LY=153:** LY reads 153 for one M-cycle, then 0; LYC=153 matches at dot 4 and LYC=0 at
+    dot 12. No DMG acceptance test covers this, so it follows the commonly documented timing.
+  - **Boot state:** the internal counter starts at 0xABC8 rather than 0xABCC (`boot_div`)
+    and P1 reads 0xCF (`boot_hwio`).
+  - **Serial** bits shift on the divider clock (just before bit 8 of the counter falls),
+    so a transfer's length depends on the counter's phase (`boot_sclk_align`).
+  - **MBC1 multicarts** (MBC1M) are detected the usual way (1 MiB with a second Nintendo
+    logo at 0x40104) and wire BANK2 one bit lower.
+- **Save states** carry the new PPU and serial fields, so `STATE_VERSION` is now 2. States
+  from development builds are rejected with the usual message; none had shipped.
+- **Cost:** about 3-5% slower (`dmg-acid2` 1.52 → 1.57 ms/frame in back-to-back runs, still
+  over 10x real time), from more per-M-cycle branching in the PPU and DMA.
+- Unit tests cover each fix without needing the downloaded ROMs.
+
+### Polish: debugger extras and gamepad remapping (2026-10-19)
+
+Decided before starting: memory editing covers RAM and I/O but never ROM; a symbol file is
+kept per game on the device; one gamepad layout is shared by every controller.
+
+- **Breakpoints** take an optional ROM bank, typed as `03:4567`. It only means something in
+  switchable ROM (0x4000-0x7FFF) and is matched against the bank actually mapped there,
+  wrapped to the ROM's size; debug snapshots now report that bank too. A breakpoint set
+  from the disassembly gutter in that area is for the bank on screen.
+- **Watchpoints** stop on reads, writes or both (R/W toggles per watchpoint, and "Stop on
+  read" / "Stop on write" in the memory view). Reads come from a `GameBoy.onRead` hook that
+  is null unless a read watchpoint exists, like `onWrite`; the benchmark is unchanged. The
+  instruction's own opcode and operand fetches are not data reads and don't trigger one.
+- **Memory editing** (`GameBoy.poke`, while paused): VRAM and OAM regardless of PPU mode or
+  DMA, RAM, HRAM, and I/O registers written as the CPU would, with their side effects. ROM
+  and the unusable area are refused. When the byte reads back differently (read-only
+  register bits, disabled cartridge RAM) the view says what it reads instead.
+- **Symbols:** an RGBDS `.sym` file loaded in the debugger is validated, kept in a new
+  IndexedDB store (schema version 2, upgraded in place) and reloaded with the game. Labels
+  head their lines in the disassembly, replace addresses in operands (including
+  `($FF00+n)`), appear next to breakpoints, watchpoints and the selected byte, and are
+  accepted wherever an address is typed. Same-address labels in switchable ROM are told
+  apart by bank; a routine's own name is preferred to its local labels.
+- **Gamepads:** the controller layout is a setting, edited like the keyboard's (the two
+  share a list component): press a controller button to bind it. Buttons are named by
+  standard-mapping position (Face ↓, L1, D-pad ↑…), since printed labels differ by maker.
+  A button already held when binding starts only counts once it is pressed again, and
+  controller input doesn't reach the game while binding. The left stick stays the d-pad.
+- The debugger chunk grew from 24 to 29 KB.
+
 ### Not yet done / follow-ups
 
-- Playwright E2E in CI (verified manually with Playwright for now), keyboard remapping UI,
-  Mooneye acceptance tests, the LY=153 quirk and mid-scanline PPU effects.
+- Mid-scanline PPU effects (a pixel FIFO): register writes during mode 3 still apply to the
+  whole line. The timing tests pass without one.
+- Not run from Mooneye: tests for other models (DMG0, MGB, SGB, CGB, AGB: the
+  suffixed `acceptance/` tests, `misc/` and `madness/`), and `manual-only/`, which is
+  checked by eye against screenshots.
+- Smaller timing details no test ROM here covers: OAM DMA bus conflicts (the CPU reading
+  the DMA's source bus), window tile alignment in the sprite penalty, and a DIV reset
+  clocking the serial port.
 - APU obscura not covered by the test ROMs: envelope "zombie mode" writes and the
   sub-M-cycle timing of square-channel triggers.
-- Milestone 8: debugger, PWA, and keyboard shortcuts for save slots.
+- Debugger: conditional breakpoints, editing registers, and banked watchpoints for
+  cartridge RAM.
 - One-time GitHub setting: Pages source must be switched to "GitHub Actions" for the new
   deploy job (previously the `gh-pages` branch).

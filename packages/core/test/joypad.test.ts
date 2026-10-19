@@ -4,6 +4,10 @@ import { Interrupts } from '../src/interrupts';
 import { Joypad } from '../src/joypad';
 
 describe('Joypad', () => {
+  it('starts with both groups selected, as the boot ROM leaves it', () => {
+    expect(new Joypad(new Interrupts()).read()).toBe(0xcf);
+  });
+
   it('reports pressed buttons as 0 on the selected line and raises an interrupt', () => {
     const interrupts = new Interrupts();
     interrupts.flags = 0;

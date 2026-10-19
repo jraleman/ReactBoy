@@ -1,8 +1,13 @@
 import { Interrupt, type Interrupts } from './interrupts';
 import type { StateReader, StateWriter, Stateful } from './state';
 
-/** T-cycles to shift out one byte with the internal 8192 Hz clock. */
-const TRANSFER_CYCLES = 8 * 512;
+/**
+ * Bit of the timer's internal counter that the internal 8192 Hz serial clock is divided
+ * from. A bit shifts on each falling edge, so a transfer's timing depends on the counter's
+ * phase rather than on when SC was written. Measured against Mooneye's boot_sclk_align, the
+ * shift lands on the M-cycle before the counter, as the timer reports it, reaches the edge.
+ */
+const CLOCK_BIT = 1 << 8;
 
 /**
  * SB/SC with no link partner attached: bytes shift out and 0xFF shifts in. Sent bytes are
@@ -12,9 +17,14 @@ export class Serial implements Stateful {
   data = 0;
   control = 0x7e;
   onByte: ((byte: number) => void) | null = null;
-  private remaining = 0;
+  /** Bits still to shift in the current transfer. */
+  private bitsLeft = 0;
 
-  constructor(private readonly interrupts: Interrupts) {}
+  constructor(
+    private readonly interrupts: Interrupts,
+    /** The timer's internal counter, already advanced for the current M-cycle. */
+    private readonly counter: () => number,
+  ) {}
 
   readControl(): number {
     return this.control | 0x7e;
@@ -25,14 +35,15 @@ export class Serial implements Stateful {
     // Only transfers on the internal clock progress without a partner.
     if ((value & 0x81) === 0x81) {
       this.onByte?.(this.data);
-      this.remaining = TRANSFER_CYCLES;
+      this.bitsLeft = 8;
     }
   }
 
   tick(): void {
-    if (this.remaining === 0) return;
-    this.remaining -= 4;
-    if (this.remaining === 0) {
+    if (this.bitsLeft === 0) return;
+    const counter = this.counter();
+    if ((counter & CLOCK_BIT) === 0 || ((counter + 4) & CLOCK_BIT) !== 0) return;
+    if (--this.bitsLeft === 0) {
       this.data = 0xff;
       this.control &= 0x7f;
       this.interrupts.request(Interrupt.Serial);
@@ -42,12 +53,12 @@ export class Serial implements Stateful {
   writeState(w: StateWriter): void {
     w.u8(this.data);
     w.u8(this.control);
-    w.u16(this.remaining);
+    w.u8(this.bitsLeft);
   }
 
   readState(r: StateReader): void {
     this.data = r.u8();
     this.control = r.u8();
-    this.remaining = r.u16();
+    this.bitsLeft = r.u8();
   }
 }

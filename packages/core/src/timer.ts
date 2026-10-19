@@ -14,7 +14,7 @@ const TAC_BITS = [1 << 9, 1 << 3, 1 << 5, 1 << 7] as const;
  */
 export class Timer implements Stateful {
   /** Internal 16-bit counter; post-boot value on a DMG. */
-  counter = 0xabcc;
+  counter = 0xabc8;
   tima = 0;
   tma = 0;
   tac = 0xf8;
@@ -71,10 +71,20 @@ export class Timer implements Stateful {
     return this.tac | 0xf8;
   }
 
+  /**
+   * The write lands before the counter advances in its M-cycle, but {@link tick} has already
+   * run with the old TAC. So TIMA counts the falling edge that the correct order would give
+   * (on the switch itself, or on that advance under the new setting) unless tick() already
+   * did. Outside the M-cycle where the selected bit falls, this is just the switch's edge.
+   */
   writeTac(value: number): void {
-    const before = this.signal();
+    const prev = (this.counter - 4) & 0xffff;
+    const oldPrev = this.signal(this.tac, prev);
+    const counted = oldPrev && !this.signal();
     this.tac = value & 0x07;
-    if (before && !this.signal()) this.incrementTima();
+    const newPrev = this.signal(this.tac, prev);
+    const edge = newPrev ? !this.signal() : oldPrev;
+    if (edge && !counted) this.incrementTima();
   }
 
   writeState(w: StateWriter): void {
@@ -95,8 +105,8 @@ export class Timer implements Stateful {
     this.reloading = r.bool();
   }
 
-  private signal(): boolean {
-    return (this.tac & 0x04) !== 0 && (this.counter & TAC_BITS[this.tac & 3]!) !== 0;
+  private signal(tac = this.tac, counter = this.counter): boolean {
+    return (tac & 0x04) !== 0 && (counter & TAC_BITS[tac & 3]!) !== 0;
   }
 
   private incrementTima(): void {

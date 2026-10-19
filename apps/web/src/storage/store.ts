@@ -30,6 +30,12 @@ export interface StoredState extends StateInfo {
   data: ArrayBuffer;
 }
 
+/** A debugger symbol file (RGBDS .sym) kept for a game. */
+export interface StoredSymbols {
+  name: string;
+  text: string;
+}
+
 /** Everything ReactBoy keeps on the device, keyed by game. */
 export interface GameStore {
   /** False when saves only last until the page is closed. */
@@ -47,6 +53,9 @@ export interface GameStore {
   putState(id: string, state: StoredState): Promise<void>;
   /** States saved for a game, without their data. */
   listStates(id: string): Promise<StateInfo[]>;
+  getSymbols(id: string): Promise<StoredSymbols | null>;
+  /** Null forgets them. */
+  putSymbols(id: string, symbols: StoredSymbols | null): Promise<void>;
 }
 
 export const byLastPlayed = (a: RecentGame, b: RecentGame) => b.lastPlayed - a.lastPlayed;
@@ -58,6 +67,7 @@ export class MemoryStore implements GameStore {
   private readonly roms = new Map<string, ArrayBuffer>();
   private readonly batteries = new Map<string, StoredBattery>();
   private readonly states = new Map<string, StoredState>();
+  private readonly symbols = new Map<string, StoredSymbols>();
 
   async listRecent(): Promise<RecentGame[]> {
     return [...this.library.values()].sort(byLastPlayed);
@@ -100,5 +110,15 @@ export class MemoryStore implements GameStore {
     return [...this.states.entries()]
       .filter(([key]) => key.startsWith(`${id}/`))
       .map(([, { slot, created, thumbnail }]) => ({ slot, created, thumbnail }));
+  }
+
+  async getSymbols(id: string): Promise<StoredSymbols | null> {
+    const symbols = this.symbols.get(id);
+    return symbols ? { ...symbols } : null;
+  }
+
+  async putSymbols(id: string, symbols: StoredSymbols | null): Promise<void> {
+    if (symbols) this.symbols.set(id, { ...symbols });
+    else this.symbols.delete(id);
   }
 }

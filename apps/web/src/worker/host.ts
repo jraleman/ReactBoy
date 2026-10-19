@@ -1,5 +1,5 @@
-import { GameBoy, PALETTES, type Palette } from '@reactboy/core';
-import type { ClientMessage, HostMessage, Post } from './protocol';
+import { Debugger, GameBoy, PALETTES, type BreakReason, type Palette } from '@reactboy/core';
+import type { ClientMessage, DebugReport, HostMessage, Post } from './protocol';
 
 /** Frames between battery reports while a game keeps writing to cartridge RAM (~2 s). */
 const BATTERY_FLUSH_FRAMES = 120;
@@ -18,6 +18,12 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
   let sampleRate = 0;
   let channels = 0x0f;
   let framesSinceFlush = 0;
+  let debugConfig: Omit<Extract<ClientMessage, { type: 'debug' }>, 'type'> = {
+    enabled: false,
+    breakpoints: [],
+    watchpoints: [],
+  };
+  let debug: Debugger | null = null;
   // Framebuffers bounce between threads; reuse them instead of allocating one per frame.
   const pool: ArrayBuffer[] = [];
 
@@ -60,12 +66,26 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
     gb = next;
     rom = image;
     key = imageKey;
+    attachDebugger();
     post({ type: 'loaded', key, header: gb.header, resumed });
   };
 
-  const sendFrame = () => {
+  /** (Re)creates the debugger for the current game, or drops it when it is off. */
+  const attachDebugger = () => {
+    debug?.detach();
+    debug = null;
+    if (!gb || !debugConfig.enabled) return;
+    debug = new Debugger(gb);
+    debug.setBreakpoints(debugConfig.breakpoints);
+    debug.setWatchpoints(debugConfig.watchpoints);
+  };
+
+  const report = (stop: BreakReason | null): DebugReport | null =>
+    debug && { snapshot: debug.snapshot(), stop, stepping: debug.stepping };
+
+  const sendFrame = (debugReport: DebugReport | null = null) => {
     if (!gb) {
-      post({ type: 'frame', pixels: null, audio: null, frameCount: 0 });
+      post({ type: 'frame', pixels: null, audio: null, frameCount: 0, debug: null });
       return;
     }
     const source = gb.framebuffer;
@@ -74,7 +94,11 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
     const samples = gb.apu.takeSamples();
     const audio = samples.length > 0 ? (samples.slice().buffer as ArrayBuffer) : null;
     const transfer = audio ? [pixels, audio] : [pixels];
-    post({ type: 'frame', pixels, audio, frameCount: gb.ppu.frameCount }, transfer);
+    if (debugReport) transfer.push(debugReport.snapshot.memory.buffer as ArrayBuffer);
+    post(
+      { type: 'frame', pixels, audio, frameCount: gb.ppu.frameCount, debug: debugReport },
+      transfer,
+    );
   };
 
   const reply = (id: number, data: Uint8Array | null, error: string | null = null) => {
@@ -108,11 +132,32 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
       case 'run':
         // Always answer, so the client's in-flight request never dangles.
         if (gb) {
-          for (let i = 0; i < message.frames; i++) gb.runFrame();
+          let stop: BreakReason | null = null;
+          for (let i = 0; i < message.frames && !stop; i++) {
+            if (debug) stop = debug.runFrame();
+            else gb.runFrame();
+          }
           framesSinceFlush += message.frames;
           if (framesSinceFlush >= BATTERY_FLUSH_FRAMES) flushBattery();
+          sendFrame(stop || message.inspect ? report(stop) : null);
+        } else {
+          sendFrame();
         }
-        sendFrame();
+        break;
+      case 'debug':
+        debugConfig = message;
+        attachDebugger();
+        break;
+      case 'step':
+        if (gb && debug) debug.step(message.mode);
+        sendFrame(report(null));
+        break;
+      case 'cancel-step':
+        debug?.cancelStep();
+        break;
+      case 'poke':
+        if (gb && debug) gb.poke(message.addr, message.value);
+        sendFrame(report(null));
         break;
       case 'button':
         gb?.setButton(message.button, message.pressed);

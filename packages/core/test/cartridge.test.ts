@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createCartridge, InvalidRomError, parseHeader, UnsupportedCartridgeError } from '../src';
+import { NINTENDO_LOGO } from '../src/cartridge/mbc1';
 import { makeRom } from './helpers/rom-builder';
 
 const now = () => 0;
@@ -61,6 +62,20 @@ describe('createCartridge', () => {
     mbc.writeRom(0x2000, 0x05);
     mbc.writeRom(0x4000, 0x02);
     expect(bankAt4000(read)).toBe(0x45);
+  });
+
+  it('MBC1 multicarts wire the upper bank bits one lower', () => {
+    const rom = bankedRom(0x01, 5); // 1 MiB, 64 banks
+    const plain = createCartridge(rom.slice(), now).mbc;
+    rom.set(NINTENDO_LOGO, 0x40104); // a second game's header marks a multicart
+    const multicart = createCartridge(rom, now).mbc;
+    for (const mbc of [plain, multicart]) {
+      mbc.writeRom(0x2000, 0x15);
+      mbc.writeRom(0x4000, 0x01);
+    }
+    expect(bankAt4000((a) => plain.readRom(a))).toBe(0x35);
+    // Only BANK1's low 4 bits reach the ROM; BANK2 picks the 256 KiB game.
+    expect(bankAt4000((a) => multicart.readRom(a))).toBe(0x15);
   });
 
   it('MBC1 gates RAM behind the enable register', () => {

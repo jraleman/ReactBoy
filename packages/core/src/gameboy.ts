@@ -16,7 +16,7 @@ import { Timer } from './timer';
 /** "RBST", little-endian. */
 const STATE_MAGIC = 0x54534252;
 /** Bump whenever any component's saved layout changes; older states are then rejected. */
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
 
 export interface GameBoyOptions {
   palette?: Palette;
@@ -40,6 +40,10 @@ export class GameBoy implements Bus {
   readonly mbc: Mbc;
   /** Total T-cycles since power-on. */
   cycles = 0;
+  /** Called after every CPU write while set; the debugger's watchpoints use it. */
+  onWrite: ((addr: number, value: number) => void) | null = null;
+  /** Called after every CPU read (instruction fetches included) while set. */
+  onRead: ((addr: number, value: number) => void) | null = null;
   /** Everything a save state covers, in the order it is written. */
   private readonly parts: readonly Stateful[];
   /** Global checksum (0x14E-0x14F), used to tell games apart in save states. */
@@ -55,7 +59,7 @@ export class GameBoy implements Bus {
     this.apu = new Apu();
     this.timer = new Timer(this.interrupts, () => this.apu.clockFrameSequencer());
     this.joypad = new Joypad(this.interrupts);
-    this.serial = new Serial(this.interrupts);
+    this.serial = new Serial(this.interrupts, () => this.timer.counter);
     this.mmu = new Mmu({
       mbc: this.mbc,
       ppu: this.ppu,
@@ -106,6 +110,16 @@ export class GameBoy implements Bus {
     const start = this.cycles;
     this.cpu.step();
     return this.cycles - start;
+  }
+
+  /** Reads memory without side effects, for debuggers (see {@link Mmu.peek}). */
+  peek(addr: number): number {
+    return this.mmu.peek(addr);
+  }
+
+  /** Writes memory for a debugger (see {@link Mmu.poke}); watchpoints don't see it. */
+  poke(addr: number, value: number): void {
+    this.mmu.poke(addr, value);
   }
 
   setButton(button: ButtonId, pressed: boolean): void {
@@ -196,11 +210,14 @@ export class GameBoy implements Bus {
   // --- Bus ------------------------------------------------------------------------------
 
   read(addr: number): number {
-    return this.mmu.read(addr);
+    const value = this.mmu.read(addr);
+    if (this.onRead !== null) this.onRead(addr, value);
+    return value;
   }
 
   write(addr: number, value: number): void {
     this.mmu.write(addr, value);
+    if (this.onWrite !== null) this.onWrite(addr, value);
   }
 
   tick(): void {

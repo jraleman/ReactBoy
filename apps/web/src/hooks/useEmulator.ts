@@ -1,5 +1,5 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
-import type { EmulatorClient, EmulatorState } from '../worker/client';
+import type { DebugState, EmulatorClient, EmulatorState } from '../worker/client';
 
 export const EmulatorContext = createContext<EmulatorClient | null>(null);
 
@@ -13,4 +13,10 @@ export function useEmulatorClient(): EmulatorClient {
 export function useEmulatorState(): EmulatorState {
   const client = useEmulatorClient();
   return useSyncExternalStore(client.subscribe, client.getSnapshot);
+}
+
+/** The debugger's state; updates ~10 times a second while it is open and the game runs. */
+export function useDebugState(): DebugState {
+  const client = useEmulatorClient();
+  return useSyncExternalStore(client.subscribeDebug, client.getDebugSnapshot);
 }

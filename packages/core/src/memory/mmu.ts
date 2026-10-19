@@ -40,28 +40,53 @@ export class Mmu implements Stateful {
   read(addr: number): number {
     const d = this.devices;
     if (addr < 0x8000) return d.mbc.readRom(addr);
-    if (addr < 0xa000) return d.ppu.vramAccessible() ? d.ppu.vram[addr - 0x8000]! : 0xff;
+    if (addr < 0xa000) return d.ppu.vramReadable() ? d.ppu.vram[addr - 0x8000]! : 0xff;
     if (addr < 0xc000) return d.mbc.readRam(addr);
     if (addr < 0xfe00) return this.wram[this.wramOffset(addr)]!;
     if (addr < 0xfea0) {
-      return d.ppu.oamAccessible() && !this.dma.active ? d.ppu.oam[addr - 0xfe00]! : 0xff;
+      return d.ppu.oamReadable() && !this.dma.active ? d.ppu.oam[addr - 0xfe00]! : 0xff;
     }
     if (addr < 0xff00) return 0xff;
     if (addr >= 0xff80 && addr < 0xffff) return this.hram[addr - 0xff80]!;
     return this.readIo(addr);
   }
 
+  /**
+   * What `addr` holds, for debuggers: VRAM and OAM even while the PPU or DMA blocks them,
+   * and no side effects on the sound hardware.
+   */
+  peek(addr: number): number {
+    const d = this.devices;
+    if (addr >= 0x8000 && addr < 0xa000) return d.ppu.vram[addr - 0x8000]!;
+    if (addr >= 0xfe00 && addr < 0xfea0) return d.ppu.oam[addr - 0xfe00]!;
+    if (addr >= 0xff10 && addr < 0xff40) return d.apu.peek(addr);
+    return this.read(addr);
+  }
+
+  /**
+   * Writes `addr` for debuggers: VRAM and OAM even while the PPU or DMA blocks them. ROM and
+   * the unusable area are left alone (a write there would switch banks, not change bytes);
+   * everything else is written as the CPU would, so I/O registers have their usual effects.
+   */
+  poke(addr: number, value: number): void {
+    const d = this.devices;
+    if (addr < 0x8000 || (addr >= 0xfea0 && addr < 0xff00)) return;
+    if (addr < 0xa000) d.ppu.vram[addr - 0x8000] = value;
+    else if (addr >= 0xfe00 && addr < 0xfea0) d.ppu.oam[addr - 0xfe00] = value;
+    else this.write(addr, value);
+  }
+
   write(addr: number, value: number): void {
     const d = this.devices;
     if (addr < 0x8000) d.mbc.writeRom(addr, value);
     else if (addr < 0xa000) {
-      if (d.ppu.vramAccessible()) d.ppu.vram[addr - 0x8000] = value;
+      if (d.ppu.vramWritable()) d.ppu.vram[addr - 0x8000] = value;
     } else if (addr < 0xc000) {
       d.mbc.writeRam(addr, value);
       this.cartRamDirty = true;
     } else if (addr < 0xfe00) this.wram[this.wramOffset(addr)] = value;
     else if (addr < 0xfea0) {
-      if (d.ppu.oamAccessible() && !this.dma.active) d.ppu.oam[addr - 0xfe00] = value;
+      if (d.ppu.oamWritable() && !this.dma.active) d.ppu.oam[addr - 0xfe00] = value;
     } else if (addr < 0xff00) {
       // Unusable region: writes are ignored.
     } else if (addr >= 0xff80 && addr < 0xffff) this.hram[addr - 0xff80] = value;

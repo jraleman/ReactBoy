@@ -2,7 +2,8 @@ import { useId, useRef } from 'react';
 import { PALETTES, type PaletteName } from '@reactboy/core';
 import { useEmulatorClient, useEmulatorState } from '../../hooks/useEmulator';
 import type { Settings, ShellTheme } from '../../hooks/useSettings';
-import { BUTTON_LABELS, DEFAULT_KEYMAP } from '../../input/buttons';
+import { GamepadBindings } from './GamepadBindings';
+import { KeyBindings } from './KeyBindings';
 import styles from './Panel.module.css';
 import { RecentGames } from './RecentGames';
 import { SaveSlots } from './SaveSlots';
@@ -22,18 +23,6 @@ const SHELLS: { id: ShellTheme; name: string; color: string }[] = [
   { id: 'yellow', name: 'Yellow', color: '#f0c02e' },
 ];
 
-const KEY_NAMES: Record<string, string> = {
-  ArrowUp: '↑',
-  ArrowDown: '↓',
-  ArrowLeft: '←',
-  ArrowRight: '→',
-  KeyX: 'X',
-  KeyZ: 'Z',
-  Enter: 'Enter',
-  Backspace: 'Backspace',
-  ShiftRight: 'Right Shift',
-};
-
 const kib = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${bytes / 1024 / 1024} MiB` : `${bytes / 1024} KiB`;
 
@@ -41,21 +30,17 @@ interface Props {
   settings: Settings;
   onSettings: (patch: Partial<Settings>) => void;
   onLoad: (file: File) => void;
+  onDebugger: () => void;
+  /** Focus the debugger button on mount, because the debugger just closed. */
+  focusDebugger?: boolean;
 }
 
-export function Panel({ settings, onSettings, onLoad }: Props) {
+export function Panel({ settings, onSettings, onLoad, onDebugger, focusDebugger }: Props) {
   const client = useEmulatorClient();
   const { status, header, error, fps, notice, sound } = useEmulatorState();
   const fileInput = useRef<HTMLInputElement>(null);
   const id = useId();
   const loaded = status === 'running' || status === 'paused';
-
-  // Group keys by button for the help table: "Select: Backspace or Right Shift".
-  const keysByButton = new Map<string, string[]>();
-  for (const [code, button] of Object.entries(DEFAULT_KEYMAP)) {
-    const label = BUTTON_LABELS[button];
-    keysByButton.set(label, [...(keysByButton.get(label) ?? []), KEY_NAMES[code] ?? code]);
-  }
 
   return (
     <aside className={styles.panel} aria-label="Emulator controls">
@@ -262,22 +247,33 @@ export function Panel({ settings, onSettings, onLoad }: Props) {
         <h2 id={`${id}-keys`} className={styles.heading}>
           Keyboard
         </h2>
-        <dl className={styles.keys}>
-          {[...keysByButton].map(([button, keys]) => (
-            <div key={button} className={styles.keyRow}>
-              <dt>{button}</dt>
-              <dd>
-                {keys.map((key, i) => (
-                  <span key={key}>
-                    {i > 0 && ' or '}
-                    <kbd>{key}</kbd>
-                  </span>
-                ))}
-              </dd>
-            </div>
-          ))}
-        </dl>
-        <p className={styles.note}>Gamepads work too: connect one and press any button.</p>
+        <KeyBindings keymap={settings.keymap} onChange={(keymap) => onSettings({ keymap })} />
+      </section>
+
+      <section className={styles.section} aria-labelledby={`${id}-pad`}>
+        <h2 id={`${id}-pad`} className={styles.heading}>
+          Controller
+        </h2>
+        <GamepadBindings padmap={settings.padmap} onChange={(padmap) => onSettings({ padmap })} />
+      </section>
+
+      <section className={styles.section} aria-labelledby={`${id}-dev`}>
+        <h2 id={`${id}-dev`} className={styles.heading}>
+          Developer tools
+        </h2>
+        <div className={styles.row}>
+          <button
+            type="button"
+            className={styles.button}
+            autoFocus={focusDebugger}
+            onClick={onDebugger}
+          >
+            Open debugger
+          </button>
+        </div>
+        <p className={styles.note}>
+          Step through the game’s code and inspect its memory, tiles, sprites and registers.
+        </p>
       </section>
 
       <footer className={styles.footer}>

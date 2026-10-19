@@ -18,7 +18,8 @@ export type ButtonId = (typeof Button)[keyof typeof Button];
 export class Joypad implements Stateful {
   /** Bit set = button held, laid out as in {@link Button}. */
   private held = 0;
-  private select = 0x30;
+  /** The boot ROM leaves both groups selected (P1 reads 0xCF). */
+  private select = 0x00;
 
   constructor(private readonly interrupts: Interrupts) {}
 

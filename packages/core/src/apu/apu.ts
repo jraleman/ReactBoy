@@ -98,6 +98,20 @@ export class Apu implements Stateful {
     this.sync();
     const i = addr - 0xff10;
     if (i >= WAVE_RAM) return this.wave.readRam(i - WAVE_RAM);
+    return this.readRegister(i);
+  }
+
+  /**
+   * {@link read} for debuggers: doesn't catch the channels up, and shows all of wave RAM
+   * even while the channel is playing.
+   */
+  peek(addr: number): number {
+    const i = addr - 0xff10;
+    if (i >= WAVE_RAM) return this.wave.ram[i - WAVE_RAM]!;
+    return this.readRegister(i);
+  }
+
+  private readRegister(i: number): number {
     if (i === NR52) {
       return (
         (this.powered ? 0x80 : 0) |

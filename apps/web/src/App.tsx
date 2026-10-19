@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type DragEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type DragEvent } from 'react';
 import { PALETTES, type ButtonId } from '@reactboy/core';
 import styles from './App.module.css';
 import { ActionButtons } from './components/controls/ActionButtons';
@@ -7,13 +7,17 @@ import { StartSelect } from './components/controls/StartSelect';
 import { Panel } from './components/panel/Panel';
 import { Screen } from './components/screen/Screen';
 import { GameBoyShell } from './components/shell/GameBoyShell';
+import { UpdateBanner } from './components/update/UpdateBanner';
 import { useDeviceScale } from './hooks/useDeviceScale';
 import { useEmulatorClient, useEmulatorState } from './hooks/useEmulator';
 import { useKeyboard } from './hooks/useKeyboard';
 import { useSettings } from './hooks/useSettings';
-import { DEFAULT_KEYMAP } from './input/buttons';
+import { useShortcuts } from './hooks/useShortcuts';
 
 const hasFiles = (event: DragEvent) => event.dataTransfer.types.includes('Files');
+
+// Developer tools stay out of the main bundle until someone opens them.
+const Debugger = lazy(() => import('./components/debugger/Debugger'));
 
 export function App() {
   const client = useEmulatorClient();
@@ -21,11 +25,15 @@ export function App() {
   const [settings, updateSettings] = useSettings();
   const scale = useDeviceScale();
   const [dragging, setDragging] = useState(false);
+  /** Where focus goes when the debugger opens or closes, so it isn't lost with the panel. */
+  const [debuggerToggled, setDebuggerToggled] = useState(false);
   const palette = PALETTES[settings.palette] ?? PALETTES.classic;
 
-  useKeyboard(client, DEFAULT_KEYMAP);
+  useKeyboard(client, settings.keymap);
+  useShortcuts(client);
   useEffect(() => client.setPalette(palette), [client, palette]);
   useEffect(() => client.setSpeed(settings.speed), [client, settings.speed]);
+  useEffect(() => client.setGamepadMap(settings.padmap), [client, settings.padmap]);
   const { volume, muted, channels } = settings;
   useEffect(() => client.setAudio({ volume, muted, channels }), [client, volume, muted, channels]);
   useEffect(() => {
@@ -84,12 +92,35 @@ export function App() {
           menu={<StartSelect onButton={onTouch} pressed={pressed} />}
         />
       </div>
-      <Panel settings={settings} onSettings={updateSettings} onLoad={load} />
+      {settings.debugger ? (
+        <Suspense fallback={<p className={styles.loading}>Loading the debugger…</p>}>
+          <Debugger
+            palette={palette}
+            autoFocus={debuggerToggled}
+            onClose={() => {
+              setDebuggerToggled(true);
+              updateSettings({ debugger: false });
+            }}
+          />
+        </Suspense>
+      ) : (
+        <Panel
+          settings={settings}
+          onSettings={updateSettings}
+          onLoad={load}
+          focusDebugger={debuggerToggled}
+          onDebugger={() => {
+            setDebuggerToggled(true);
+            updateSettings({ debugger: true });
+          }}
+        />
+      )}
       <p className="visually-hidden" role="status" aria-live="polite">
         {status === 'running' && header ? `Playing ${header.title}` : ''}
         {status === 'paused' ? 'Paused' : ''}
         {notice ? ` ${notice}` : ''}
       </p>
+      <UpdateBanner />
       {dragging && (
         <div className={styles.dropHint} aria-hidden="true">
           Drop to load the ROM

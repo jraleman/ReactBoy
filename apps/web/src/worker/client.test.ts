@@ -170,3 +170,86 @@ describe('EmulatorClient saves', () => {
     client.dispose();
   });
 });
+
+describe('EmulatorClient save slots', () => {
+  it('says when a slot to load is empty', async () => {
+    const client = new EmulatorClient({ store: new MemoryStore() });
+    await load(client, batteryRom);
+    await client.loadState('2');
+    expect(client.getSnapshot().notice).toBe('Slot 2 is empty.');
+    client.dispose();
+  });
+});
+
+describe('EmulatorClient debugger', () => {
+  /** loop: INC A; JR loop */
+  const loopRom = makeRom([0x3c, 0x18, 0xfd]);
+
+  it('stops at a breakpoint, steps, and runs at full speed once closed', async () => {
+    const client = new EmulatorClient({ store: new MemoryStore() });
+    await load(client, loopRom);
+    client.pause();
+    client.setDebuggerOpen(true);
+    client.setBreakpoints([{ addr: 0x101, bank: null }]);
+    await settle();
+
+    await step(client);
+    expect(client.getDebugSnapshot()).toMatchObject({
+      stop: { type: 'breakpoint', pc: 0x101 },
+      snapshot: { pc: 0x101 },
+    });
+    expect(client.getSnapshot().notice).toBe('Stopped at breakpoint $0101.');
+
+    client.debugStep('into');
+    await settle();
+    const { snapshot, previous, stop } = client.getDebugSnapshot();
+    expect(snapshot?.pc).toBe(0x100);
+    expect(previous?.pc).toBe(0x101);
+    expect(stop).toBeNull();
+
+    // The next frame stops at the breakpoint again, after one more INC A.
+    await step(client);
+    const after = client.getDebugSnapshot().snapshot!;
+    expect(after.pc).toBe(0x101);
+    expect(after.af >> 8).toBe(((snapshot!.af >> 8) + 1) & 0xff);
+
+    client.setDebuggerOpen(false);
+    await step(client);
+    expect(client.getDebugSnapshot()).toMatchObject({ open: false, snapshot: null, stop: null });
+    client.dispose();
+  });
+
+  it('edits memory while paused and shows the result', async () => {
+    const client = new EmulatorClient({ store: new MemoryStore() });
+    await load(client, loopRom);
+    client.setDebuggerOpen(true);
+    client.poke(0xc000, 0x42); // ignored while running
+    client.pause();
+    await settle();
+    client.poke(0xc000, 0x42);
+    await settle();
+    const { snapshot, previous } = client.getDebugSnapshot();
+    expect(snapshot!.memory[0xc000]).toBe(0x42);
+    expect(previous!.memory[0xc000]).not.toBe(0x42);
+    client.dispose();
+  });
+
+  it('remembers a symbol file per game', async () => {
+    const store = new MemoryStore();
+    const client = new EmulatorClient({ store });
+    await load(client, loopRom);
+    const symbols = { name: 'loop.sym', text: '00:0100 Loop' };
+    await client.setSymbols(symbols);
+    expect(client.getDebugSnapshot().symbols).toEqual(symbols);
+
+    // Another game has none; coming back to this one brings them back.
+    await load(client, makeRom([0x18, 0xfe]));
+    await vi.waitFor(() => expect(client.getDebugSnapshot().symbols).toBeNull());
+    await load(client, loopRom);
+    await vi.waitFor(() => expect(client.getDebugSnapshot().symbols).toEqual(symbols));
+
+    await client.setSymbols(null);
+    expect(await store.getSymbols(client.getSnapshot().gameId!)).toBeNull();
+    client.dispose();
+  });
+});

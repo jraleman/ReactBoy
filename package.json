@@ -12,6 +12,7 @@
     "preview": "pnpm --filter @reactboy/web preview",
     "test": "pnpm -r test",
     "test:roms": "pnpm --filter @reactboy/core test:roms",
+    "test:e2e": "pnpm --filter @reactboy/web test:e2e",
     "fetch-roms": "node scripts/fetch-test-roms.mjs",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
