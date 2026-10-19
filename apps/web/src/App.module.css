@@ -8,6 +8,11 @@
   padding: 8px 16px 40px;
 }
 
+/* Narrow layouts stack the panel under the device as if this wrapper weren't there. */
+.side {
+  display: contents;
+}
+
 .device {
   display: flex;
   justify-content: center;
@@ -21,6 +26,29 @@
     justify-content: center;
     gap: 64px;
     padding: 24px 32px;
+  }
+
+  .side {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .side[data-debugger] {
+    max-width: 760px;
+  }
+
+  /* A part's explainer stays in view at the top while the panel scrolls under it. */
+  .cardSlot {
+    position: sticky;
+    top: 24px;
+    z-index: 1;
+  }
+
+  .cardSlot:empty {
+    display: none;
   }
 
   /* The device stays put while the panel scrolls beside it. */

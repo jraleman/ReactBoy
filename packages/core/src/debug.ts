@@ -71,6 +71,33 @@ const WATCH_WRITE = 1;
 const WATCH_READ = 2;
 const BANKED = { start: 0x4000, end: 0x8000 };
 
+/** The bank mapped at 0x4000-0x7FFF, wrapped to the banks the ROM has. */
+function mappedBank(gb: GameBoy): number {
+  const banks = Math.max(2, gb.header.romSize >> 14);
+  return gb.mbc.romBank % banks;
+}
+
+/** The machine as a debugger shows it; needs no {@link Debugger} attached. */
+export function snapshot(gb: GameBoy): DebugSnapshot {
+  const { cpu } = gb;
+  const memory = new Uint8Array(0x10000);
+  for (let addr = 0; addr < memory.length; addr++) memory[addr] = gb.peek(addr);
+  return {
+    af: cpu.af,
+    bc: cpu.bc,
+    de: cpu.de,
+    hl: cpu.hl,
+    sp: cpu.sp,
+    pc: cpu.pc,
+    ime: cpu.ime,
+    cpu: cpu.locked ? 'locked' : cpu.stopped ? 'stopped' : cpu.halted ? 'halted' : 'running',
+    romBank: mappedBank(gb),
+    cycles: gb.cycles,
+    frame: gb.ppu.frameCount,
+    memory,
+  };
+}
+
 /**
  * Breakpoints, watchpoints and stepping for a {@link GameBoy}. Watchpoints, and breakpoints
  * without a bank, match a CPU address in whatever bank is mapped there.
@@ -211,36 +238,13 @@ export class Debugger {
   }
 
   snapshot(): DebugSnapshot {
-    const { gb } = this;
-    const { cpu } = gb;
-    const memory = new Uint8Array(0x10000);
-    for (let addr = 0; addr < memory.length; addr++) memory[addr] = gb.peek(addr);
-    return {
-      af: cpu.af,
-      bc: cpu.bc,
-      de: cpu.de,
-      hl: cpu.hl,
-      sp: cpu.sp,
-      pc: cpu.pc,
-      ime: cpu.ime,
-      cpu: cpu.locked ? 'locked' : cpu.stopped ? 'stopped' : cpu.halted ? 'halted' : 'running',
-      romBank: this.mappedBank(),
-      cycles: gb.cycles,
-      frame: gb.ppu.frameCount,
-      memory,
-    };
-  }
-
-  /** The bank mapped at 0x4000-0x7FFF, wrapped to the banks the ROM has. */
-  private mappedBank(): number {
-    const banks = Math.max(2, this.gb.header.romSize >> 14);
-    return this.gb.mbc.romBank % banks;
+    return snapshot(this.gb);
   }
 
   private breaksAt(pc: number): boolean {
     return (
       (this.breakpoints[pc]! & ANY_BANK) !== 0 ||
-      this.breakpointBanks.get(pc)?.has(this.mappedBank()) === true
+      this.breakpointBanks.get(pc)?.has(mappedBank(this.gb)) === true
     );
   }
 

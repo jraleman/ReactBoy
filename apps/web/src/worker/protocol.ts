@@ -23,8 +23,8 @@ export type ClientMessage =
       state: ArrayBuffer | null;
     }
   /**
-   * Runs `frames` frames (0 just redraws) and answers with a frame. With the debugger on,
-   * `inspect` asks for a snapshot with it, and a breakpoint may end the run early.
+   * Runs `frames` frames (0 just redraws) and answers with a frame. `inspect` asks for a
+   * snapshot with it; with the debugger on, a breakpoint may also end the run early.
    */
   | { type: 'run'; frames: number; inspect?: boolean }
   /** Power-cycles the game, keeping its battery RAM unless `battery` replaces it. */

@@ -1,4 +1,11 @@
-import { Debugger, GameBoy, PALETTES, type BreakReason, type Palette } from '@reactboy/core';
+import {
+  Debugger,
+  GameBoy,
+  PALETTES,
+  snapshot,
+  type BreakReason,
+  type Palette,
+} from '@reactboy/core';
 import type { ClientMessage, DebugReport, HostMessage, Post } from './protocol';
 
 /** Frames between battery reports while a game keeps writing to cartridge RAM (~2 s). */
@@ -83,6 +90,10 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
   const report = (stop: BreakReason | null): DebugReport | null =>
     debug && { snapshot: debug.snapshot(), stop, stepping: debug.stepping };
 
+  /** A look at the machine for the case's parts view, which works without the debugger. */
+  const inspect = (): DebugReport | null =>
+    report(null) ?? (gb && { snapshot: snapshot(gb), stop: null, stepping: false });
+
   const sendFrame = (debugReport: DebugReport | null = null) => {
     if (!gb) {
       post({ type: 'frame', pixels: null, audio: null, frameCount: 0, debug: null });
@@ -139,7 +150,7 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
           }
           framesSinceFlush += message.frames;
           if (framesSinceFlush >= BATTERY_FLUSH_FRAMES) flushBattery();
-          sendFrame(stop || message.inspect ? report(stop) : null);
+          sendFrame(stop ? report(stop) : message.inspect ? inspect() : null);
         } else {
           sendFrame();
         }

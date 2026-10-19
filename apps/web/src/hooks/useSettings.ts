@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
 import { PALETTES, type ButtonId, type PaletteName } from '@reactboy/core';
+import { isShellTheme, type ShellTheme } from '../components/shell/themes';
 import { DEFAULT_KEYMAP, DEFAULT_PADMAP } from '../input/buttons';
 
-export type ShellTheme = 'grey' | 'purple' | 'teal' | 'yellow';
+export type { ShellTheme };
 
 export interface Settings {
   palette: PaletteName;
@@ -50,6 +51,7 @@ function load(): Settings {
     if (!isKeymap(settings.keymap)) settings.keymap = DEFAULTS.keymap;
     if (!isPadmap(settings.padmap)) settings.padmap = DEFAULTS.padmap;
     if (!(settings.palette in PALETTES)) settings.palette = DEFAULTS.palette;
+    if (!isShellTheme(settings.shell)) settings.shell = DEFAULTS.shell;
     return settings;
   } catch {
     return DEFAULTS;

@@ -8,9 +8,10 @@ import { Panel } from './components/panel/Panel';
 import { Screen } from './components/screen/Screen';
 import { GameBoyShell } from './components/shell/GameBoyShell';
 import { UpdateBanner } from './components/update/UpdateBanner';
-import { useDeviceScale } from './hooks/useDeviceScale';
+import { useDeviceScale, WIDE_QUERY } from './hooks/useDeviceScale';
 import { useEmulatorClient, useEmulatorState } from './hooks/useEmulator';
 import { useKeyboard } from './hooks/useKeyboard';
+import { useMediaQuery } from './hooks/useMediaQuery';
 import { useSettings } from './hooks/useSettings';
 import { useShortcuts } from './hooks/useShortcuts';
 
@@ -24,6 +25,9 @@ export function App() {
   const { status, header, pressed, notice } = useEmulatorState();
   const [settings, updateSettings] = useSettings();
   const scale = useDeviceScale();
+  const wide = useMediaQuery(WIDE_QUERY);
+  /** Beside the device on wide layouts: where a clear case's part explainer goes. */
+  const [cardSlot, setCardSlot] = useState<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
   /** Where focus goes when the debugger opens or closes, so it isn't lost with the panel. */
   const [debuggerToggled, setDebuggerToggled] = useState(false);
@@ -85,36 +89,41 @@ export function App() {
         <GameBoyShell
           scale={scale}
           theme={settings.shell}
+          palette={palette}
           powered={status === 'running' || status === 'paused'}
           screen={<Screen palette={palette} />}
           dpad={<DPad onButton={onTouch} pressed={pressed} />}
           actions={<ActionButtons onButton={onTouch} pressed={pressed} />}
           menu={<StartSelect onButton={onTouch} pressed={pressed} />}
+          cardSlot={wide ? cardSlot : null}
         />
       </div>
-      {settings.debugger ? (
-        <Suspense fallback={<p className={styles.loading}>Loading the debugger…</p>}>
-          <Debugger
-            palette={palette}
-            autoFocus={debuggerToggled}
-            onClose={() => {
+      <div className={styles.side} data-debugger={settings.debugger || undefined}>
+        {wide && <div ref={setCardSlot} className={styles.cardSlot} />}
+        {settings.debugger ? (
+          <Suspense fallback={<p className={styles.loading}>Loading the debugger…</p>}>
+            <Debugger
+              palette={palette}
+              autoFocus={debuggerToggled}
+              onClose={() => {
+                setDebuggerToggled(true);
+                updateSettings({ debugger: false });
+              }}
+            />
+          </Suspense>
+        ) : (
+          <Panel
+            settings={settings}
+            onSettings={updateSettings}
+            onLoad={load}
+            focusDebugger={debuggerToggled}
+            onDebugger={() => {
               setDebuggerToggled(true);
-              updateSettings({ debugger: false });
+              updateSettings({ debugger: true });
             }}
           />
-        </Suspense>
-      ) : (
-        <Panel
-          settings={settings}
-          onSettings={updateSettings}
-          onLoad={load}
-          focusDebugger={debuggerToggled}
-          onDebugger={() => {
-            setDebuggerToggled(true);
-            updateSettings({ debugger: true });
-          }}
-        />
-      )}
+        )}
+      </div>
       <p className="visually-hidden" role="status" aria-live="polite">
         {status === 'running' && header ? `Playing ${header.title}` : ''}
         {status === 'paused' ? 'Paused' : ''}

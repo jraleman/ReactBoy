@@ -1,5 +1,5 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
-import type { DebugState, EmulatorClient, EmulatorState } from '../worker/client';
+import type { DebugState, EmulatorClient, EmulatorState, ProbeState } from '../worker/client';
 
 export const EmulatorContext = createContext<EmulatorClient | null>(null);
 
@@ -19,4 +19,10 @@ export function useEmulatorState(): EmulatorState {
 export function useDebugState(): DebugState {
   const client = useEmulatorClient();
   return useSyncExternalStore(client.subscribeDebug, client.getDebugSnapshot);
+}
+
+/** Live machine state for the case's parts view; fresh only between setProbing(true/false). */
+export function useProbeState(): ProbeState {
+  const client = useEmulatorClient();
+  return useSyncExternalStore(client.subscribeProbe, client.getProbeSnapshot);
 }

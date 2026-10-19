@@ -253,3 +253,27 @@ describe('EmulatorClient debugger', () => {
     client.dispose();
   });
 });
+
+describe('EmulatorClient probing', () => {
+  it('inspects the machine without arming the debugger', async () => {
+    const client = new EmulatorClient({ store: new MemoryStore() });
+    await load(client, makeRom([0x3c, 0x18, 0xfd]));
+    client.pause();
+    await settle();
+    expect(client.getProbeSnapshot().snapshot).toBeNull();
+
+    client.setProbing(true);
+    await settle();
+    const first = client.getProbeSnapshot().snapshot!;
+    expect(first.pc).toBeGreaterThanOrEqual(0x100);
+    await step(client);
+    const { snapshot, previous } = client.getProbeSnapshot();
+    expect(previous).toBe(first);
+    expect(snapshot!.cycles).toBeGreaterThan(first.cycles);
+    expect(client.getDebugSnapshot()).toMatchObject({ open: false, snapshot: null });
+
+    client.setProbing(false);
+    expect(client.getProbeSnapshot().snapshot).toBeNull();
+    client.dispose();
+  });
+});

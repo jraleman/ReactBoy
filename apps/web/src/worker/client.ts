@@ -74,6 +74,18 @@ export interface DebugState {
   stepping: boolean;
 }
 
+/** What the case's parts view reads, kept apart so only it re-renders. */
+export interface ProbeState {
+  /** The latest look at the machine, ~10 times a second while probing and running. */
+  snapshot: DebugSnapshot | null;
+  /** The look before it, from the same game. */
+  previous: DebugSnapshot | null;
+  /** Milliseconds between the two. */
+  elapsed: number;
+}
+
+const NO_PROBE: ProbeState = { snapshot: null, previous: null, elapsed: 0 };
+
 export interface EmulatorClientOptions {
   /** Where games and saves are kept; the device's IndexedDB by default. */
   store?: GameStore | Promise<GameStore>;
@@ -124,6 +136,10 @@ export class EmulatorClient {
     stepping: false,
   };
   private readonly debugListeners = new Set<() => void>();
+  private probeState = NO_PROBE;
+  private probeTime = 0;
+  private probing = false;
+  private readonly probeListeners = new Set<() => void>();
   private lastInspect = 0;
   private readonly send: Post<ClientMessage>;
   private readonly worker: Worker | null;
@@ -226,6 +242,18 @@ export class EmulatorClient {
     this.debugListeners.forEach((listener) => listener());
   }
 
+  subscribeProbe = (listener: () => void): (() => void) => {
+    this.probeListeners.add(listener);
+    return () => this.probeListeners.delete(listener);
+  };
+
+  getProbeSnapshot = (): ProbeState => this.probeState;
+
+  private updateProbe(probeState: ProbeState): void {
+    this.probeState = probeState;
+    this.probeListeners.forEach((listener) => listener());
+  }
+
   private notify(notice: string): void {
     clearTimeout(this.noticeTimer);
     this.update({ notice });
@@ -295,7 +323,7 @@ export class EmulatorClient {
   stepFrame(): void {
     if (this.state.status !== 'paused' || this.inFlight) return;
     this.inFlight = true;
-    this.send({ type: 'run', frames: 1, inspect: this.debugState.open });
+    this.send({ type: 'run', frames: 1, inspect: this.inspecting });
   }
 
   // --- Debugger -------------------------------------------------------------------------
@@ -311,6 +339,22 @@ export class EmulatorClient {
     });
     this.syncDebugger();
     this.redraw();
+  }
+
+  /**
+   * Keeps {@link getProbeSnapshot} fresh while someone looks at the case's parts. Unlike the
+   * debugger it arms nothing, so the game runs exactly as it would otherwise.
+   */
+  setProbing(probing: boolean): void {
+    if (probing === this.probing) return;
+    this.probing = probing;
+    if (probing) this.redraw();
+    else this.updateProbe(NO_PROBE);
+  }
+
+  /** Frames are asked to come with a snapshot. */
+  private get inspecting(): boolean {
+    return this.debugState.open || this.probing;
   }
 
   setBreakpoints(breakpoints: Breakpoint[]): void {
@@ -562,7 +606,7 @@ export class EmulatorClient {
   private redraw(): void {
     if (this.state.status !== 'paused') return;
     this.inFlight = true;
-    this.send({ type: 'run', frames: 0, inspect: this.debugState.open });
+    this.send({ type: 'run', frames: 0, inspect: this.inspecting });
   }
 
   // --- Frame loop -----------------------------------------------------------------------
@@ -595,7 +639,7 @@ export class EmulatorClient {
       const frames = Math.floor(this.due);
       this.due -= frames;
       this.inFlight = true;
-      const inspect = this.debugState.open && now - this.lastInspect >= INSPECT_MS;
+      const inspect = this.inspecting && now - this.lastInspect >= INSPECT_MS;
       if (inspect) this.lastInspect = now;
       this.send({ type: 'run', frames, inspect });
       this.framesThisSecond += frames;
@@ -634,6 +678,8 @@ export class EmulatorClient {
           stepping: false,
           ...(!sameGame && { symbols: null }),
         });
+        // Cycle counts restart with the game; don't compare across the reload.
+        this.updateProbe(NO_PROBE);
         this.audio.clear();
         this.startLoop();
         this.syncAudio();
@@ -674,6 +720,7 @@ export class EmulatorClient {
   }
 
   private inspected({ snapshot, stop, stepping }: DebugReport): void {
+    if (this.probing) this.probed(snapshot);
     if (!this.debugState.open) return;
     this.updateDebug({ snapshot, previous: this.debugState.snapshot, stepping, stop });
     if (stop) {
@@ -682,6 +729,13 @@ export class EmulatorClient {
     } else if (stepping) {
       this.play();
     }
+  }
+
+  private probed(snapshot: DebugSnapshot): void {
+    const now = performance.now();
+    const previous = this.probeState.snapshot;
+    this.updateProbe({ snapshot, previous, elapsed: previous ? now - this.probeTime : 0 });
+    this.probeTime = now;
   }
 
   // --- Input ----------------------------------------------------------------------------

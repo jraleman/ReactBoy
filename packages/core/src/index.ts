@@ -14,6 +14,7 @@ export { PALETTES, toAbgr, type Palette, type PaletteName } from './ppu/palette'
 export { PpuMode } from './ppu/ppu';
 export {
   Debugger,
+  snapshot,
   type Breakpoint,
   type Watchpoint,
   type BreakReason,

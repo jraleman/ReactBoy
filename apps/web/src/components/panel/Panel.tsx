@@ -1,7 +1,8 @@
-import { useId, useRef } from 'react';
+import { useId, useRef, type CSSProperties } from 'react';
 import { PALETTES, type PaletteName } from '@reactboy/core';
 import { useEmulatorClient, useEmulatorState } from '../../hooks/useEmulator';
-import type { Settings, ShellTheme } from '../../hooks/useSettings';
+import type { Settings } from '../../hooks/useSettings';
+import { isClear, SHELLS } from '../shell/themes';
 import { GamepadBindings } from './GamepadBindings';
 import { KeyBindings } from './KeyBindings';
 import styles from './Panel.module.css';
@@ -16,12 +17,6 @@ const PALETTE_NAMES: Record<PaletteName, string> = {
   mint: 'Mint',
   mono: 'Greyscale',
 };
-const SHELLS: { id: ShellTheme; name: string; color: string }[] = [
-  { id: 'grey', name: 'Grey', color: '#c5c1bb' },
-  { id: 'purple', name: 'Purple', color: '#6a4c9c' },
-  { id: 'teal', name: 'Teal', color: '#2e8b86' },
-  { id: 'yellow', name: 'Yellow', color: '#f0c02e' },
-];
 
 const kib = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${bytes / 1024 / 1024} MiB` : `${bytes / 1024} KiB`;
@@ -233,13 +228,19 @@ export function Panel({ settings, onSettings, onLoad, onDebugger, focusDebugger 
                 />
                 <span
                   className={styles.shellChip}
-                  style={{ background: shell.color }}
+                  data-clear={shell.clear || undefined}
+                  style={{ '--chip': shell.color } as CSSProperties}
                   aria-hidden="true"
                 />
                 <span className="visually-hidden">{shell.name}</span>
               </label>
             ))}
           </div>
+          {isClear(settings.shell) && (
+            <p className={styles.note}>
+              See-through case: click or tap a chip on the board to see what it does.
+            </p>
+          )}
         </fieldset>
       </section>
 
