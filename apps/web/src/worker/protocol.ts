@@ -1,6 +1,8 @@
+import type { LinkStatus } from './link';
 import type {
   Breakpoint,
   BreakReason,
+  BusActivity,
   ButtonId,
   CartridgeHeader,
   DebugSnapshot,
@@ -25,8 +27,9 @@ export type ClientMessage =
   /**
    * Runs `frames` frames (0 just redraws) and answers with a frame. `inspect` asks for a
    * snapshot with it; with the debugger on, a breakpoint may also end the run early.
+   * `activity` asks what the machine did since it was last asked.
    */
-  | { type: 'run'; frames: number; inspect?: boolean }
+  | { type: 'run'; frames: number; inspect?: boolean; activity?: boolean }
   /** Power-cycles the game, keeping its battery RAM unless `battery` replaces it. */
   | { type: 'reset'; battery?: ArrayBuffer }
   | { type: 'button'; button: ButtonId; pressed: boolean }
@@ -47,7 +50,9 @@ export type ClientMessage =
   /** Steps the paused machine (debugger on) and answers with an inspected frame. */
   | { type: 'step'; mode: StepMode }
   /** Abandons a step over or step out that is still running. */
-  | { type: 'cancel-step' };
+  | { type: 'cancel-step' }
+  /** Plugs the link cable to other ReactBoy windows in, or pulls it out. */
+  | { type: 'link'; enabled: boolean };
 
 /** What the debugger reports with a frame. */
 export interface DebugReport {
@@ -72,7 +77,10 @@ export type HostMessage =
       audio: ArrayBuffer | null;
       frameCount: number;
       debug: DebugReport | null;
+      activity: BusActivity | null;
     }
+  /** The link cable's state changed. */
+  | { type: 'link'; status: LinkStatus }
   /** A game failed to load; whatever was running keeps running. */
   | { type: 'error'; key: string; message: string }
   /** Battery RAM of game `key` changed; store it. */

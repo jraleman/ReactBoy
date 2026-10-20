@@ -4,8 +4,10 @@ import {
   PALETTES,
   snapshot,
   type BreakReason,
+  type BusActivity,
   type Palette,
 } from '@reactboy/core';
+import { LinkCable } from './link';
 import type { ClientMessage, DebugReport, HostMessage, Post } from './protocol';
 
 /** Frames between battery reports while a game keeps writing to cartridge RAM (~2 s). */
@@ -31,6 +33,7 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
     watchpoints: [],
   };
   let debug: Debugger | null = null;
+  const cable = new LinkCable((status) => post({ type: 'link', status }));
   // Framebuffers bounce between threads; reuse them instead of allocating one per frame.
   const pool: ArrayBuffer[] = [];
 
@@ -71,6 +74,7 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
       }
     }
     gb = next;
+    cable.plug(gb.serial);
     rom = image;
     key = imageKey;
     attachDebugger();
@@ -94,9 +98,12 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
   const inspect = (): DebugReport | null =>
     report(null) ?? (gb && { snapshot: snapshot(gb), stop: null, stepping: false });
 
-  const sendFrame = (debugReport: DebugReport | null = null) => {
+  const sendFrame = (
+    debugReport: DebugReport | null = null,
+    activity: BusActivity | null = null,
+  ) => {
     if (!gb) {
-      post({ type: 'frame', pixels: null, audio: null, frameCount: 0, debug: null });
+      post({ type: 'frame', pixels: null, audio: null, frameCount: 0, debug: null, activity });
       return;
     }
     const source = gb.framebuffer;
@@ -107,7 +114,14 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
     const transfer = audio ? [pixels, audio] : [pixels];
     if (debugReport) transfer.push(debugReport.snapshot.memory.buffer as ArrayBuffer);
     post(
-      { type: 'frame', pixels, audio, frameCount: gb.ppu.frameCount, debug: debugReport },
+      {
+        type: 'frame',
+        pixels,
+        audio,
+        frameCount: gb.ppu.frameCount,
+        debug: debugReport,
+        activity,
+      },
       transfer,
     );
   };
@@ -150,7 +164,10 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
           }
           framesSinceFlush += message.frames;
           if (framesSinceFlush >= BATTERY_FLUSH_FRAMES) flushBattery();
-          sendFrame(stop ? report(stop) : message.inspect ? inspect() : null);
+          sendFrame(
+            stop ? report(stop) : message.inspect ? inspect() : null,
+            message.activity ? gb.takeActivity() : null,
+          );
         } else {
           sendFrame();
         }
@@ -162,6 +179,9 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
       case 'step':
         if (gb && debug) debug.step(message.mode);
         sendFrame(report(null));
+        break;
+      case 'link':
+        cable.setEnabled(message.enabled);
         break;
       case 'cancel-step':
         debug?.cancelStep();

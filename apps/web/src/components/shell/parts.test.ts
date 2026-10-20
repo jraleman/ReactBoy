@@ -28,6 +28,7 @@ const snapshot = (patch: Partial<DebugSnapshot> = {}): DebugSnapshot => ({
 const context = (patch: Partial<ReadoutContext> = {}): ReadoutContext => ({
   status: 'running',
   header: null,
+  link: 'off',
   speed: 1,
   fps: 60,
   snapshot: snapshot(),
@@ -109,10 +110,15 @@ describe('part readouts', () => {
   });
 
   it('asks for a game where there is nothing to read', () => {
-    for (const id of ['lcd', 'link', 'wram', 'vram', 'cpu', 'sound']) {
+    for (const id of ['lcd', 'wram', 'vram', 'cpu', 'sound']) {
       expect(part(id).read(context({ snapshot: null }))).toEqual([
         ['Status', 'Load a game to see it work'],
       ]);
     }
+    // The cable's state is known without a game.
+    expect(part('link').read(context({ snapshot: null, link: 'waiting' }))).toEqual([
+      ['Cable', 'Waiting for a partner'],
+      ['Status', 'Load a game to see it work'],
+    ]);
   });
 });

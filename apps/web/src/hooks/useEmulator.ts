@@ -1,4 +1,5 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
+import type { BusActivity } from '@reactboy/core';
 import type { DebugState, EmulatorClient, EmulatorState, ProbeState } from '../worker/client';
 
 export const EmulatorContext = createContext<EmulatorClient | null>(null);
@@ -21,8 +22,14 @@ export function useDebugState(): DebugState {
   return useSyncExternalStore(client.subscribeDebug, client.getDebugSnapshot);
 }
 
-/** Live machine state for the case's parts view; fresh only between setProbing(true/false). */
+/** Live machine state for views of the case's insides; fresh only while a probe is open. */
 export function useProbeState(): ProbeState {
   const client = useEmulatorClient();
   return useSyncExternalStore(client.subscribeProbe, client.getProbeSnapshot);
+}
+
+/** What the machine is doing, ~10 times a second while running; fresh only while watched. */
+export function useBusActivity(): BusActivity | null {
+  const client = useEmulatorClient();
+  return useSyncExternalStore(client.subscribeActivity, client.getActivity);
 }

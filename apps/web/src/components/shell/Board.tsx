@@ -1,4 +1,5 @@
-import { memo, type ReactNode } from 'react';
+import { memo, type CSSProperties, type ReactNode } from 'react';
+import type { BoardActivity } from './activity';
 import styles from './GameBoyShell.module.css';
 
 /** `n` shapes, made from their index. */
@@ -56,8 +57,93 @@ function Sop({
   );
 }
 
-/** Copper traces as parallel runs: `path(i)` draws the i-th of `n`. */
-const bus = (n: number, path: (i: number) => string) => row(n, (i) => <path key={i} d={path(i)} />);
+/** Parallel runs of copper: `path(i)` draws the i-th of `n`. */
+const lines = (n: number, path: (i: number) => string) =>
+  Array.from({ length: n }, (_, i) => path(i));
+
+interface Bus {
+  /** What lights its signals up. */
+  activity: keyof BoardActivity;
+  paths: string[];
+  /** Signals run against the direction the paths are drawn in. */
+  inward?: boolean;
+}
+
+/** The traces, each drawn from the end its data leaves (mostly the CPU). */
+const BUSES: Bus[] = [
+  {
+    activity: 'wram',
+    paths: lines(4, (i) => `M${126 + i * 2} 252 V${228 + i * 2} H${160 + i * 4} V224`),
+  },
+  { activity: 'vram', paths: lines(4, (i) => `M145 ${258 + i * 2} H${204 + i * 4} V224`) },
+  { activity: 'cart', paths: lines(5, (i) => `M${106 + i * 2.4} 252 V200`) },
+  {
+    activity: 'lcd',
+    paths: lines(4, (i) => `M${7 + i * 2} 186 V${276 - i * 2} H100`),
+    inward: true,
+  },
+  { activity: 'clock', paths: lines(2, (i) => `M${112 + i * 6} 297 V303`), inward: true },
+  {
+    activity: 'sound',
+    paths: [
+      ...lines(3, (i) => `M${134 + i * 2.4} 297 V${368 - i * 2} H${150 + i * 3} V371`),
+      ...lines(2, (i) => `M165 ${375 + i * 3} H${187 + i * 3}`),
+    ],
+  },
+  { activity: 'link', paths: lines(3, (i) => `M241 ${64 + i * 8} H234`), inward: true },
+];
+
+const POWER: Bus = {
+  activity: 'power',
+  paths: ['M54 342 H70 V392 H150 V383', 'M30 343 V330 H92 V300', 'M24 362 V398 H64'],
+};
+
+/** Opacity that follows a part's activity, set as a custom property by LiveBoard. */
+const lit = (activity: keyof BoardActivity): CSSProperties => ({
+  opacity: `var(--${activity}, 0)`,
+});
+
+/** Pulses travelling along a bus, faded in and out with its activity. */
+function Signals({ bus, index }: { bus: Bus; index: number }) {
+  return (
+    <g className={styles.signals} style={lit(bus.activity)}>
+      {bus.paths.map((d, i) => (
+        <path
+          key={d}
+          d={d}
+          data-inward={bus.inward || undefined}
+          // Stagger the runs so a bus doesn't pulse in lockstep.
+          style={{ animationDelay: `${-(index * 0.17 + i * 0.09)}s` }}
+        />
+      ))}
+    </g>
+  );
+}
+
+/** A warm halo under a chip while it works. */
+const Glow = ({
+  activity,
+  x,
+  y,
+  w,
+  h,
+}: {
+  activity: keyof BoardActivity;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}) => (
+  <rect
+    className={styles.glow}
+    x={x}
+    y={y}
+    width={w}
+    height={h}
+    fill="url(#board-glow)"
+    style={lit(activity)}
+  />
+);
 
 /** Small surface-mount resistors and capacitors, scattered where the case shows them. */
 const PASSIVES: [x: number, y: number, vertical?: boolean][] = [
@@ -108,6 +194,16 @@ export const Board = memo(function Board() {
           <stop offset="0" stopColor="#4b4b54" />
           <stop offset="1" stopColor="#1d1d22" />
         </radialGradient>
+        <radialGradient id="board-glow">
+          <stop offset="0" stopColor="#ffd68a" stopOpacity="0.55" />
+          <stop offset="0.55" stopColor="#ffc35c" stopOpacity="0.18" />
+          <stop offset="1" stopColor="#ffc35c" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id="board-scan" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#fff1c4" stopOpacity="0" />
+          <stop offset="0.7" stopColor="#fff1c4" stopOpacity="0.75" />
+          <stop offset="1" stopColor="#fff1c4" stopOpacity="0" />
+        </linearGradient>
         <pattern id="board-vias" width="9" height="9" patternUnits="userSpaceOnUse">
           <circle cx="4.5" cy="4.5" r="0.45" fill="#2f6b52" />
         </pattern>
@@ -125,23 +221,27 @@ export const Board = memo(function Board() {
       />
 
       <g className={styles.traces}>
-        {/* CPU to work RAM, video RAM, the cartridge, the LCD ribbon, crystal and amp. */}
-        {bus(4, (i) => `M${126 + i * 2} 252 V${228 + i * 2} H${160 + i * 4} V224`)}
-        {bus(4, (i) => `M145 ${258 + i * 2} H${204 + i * 4} V224`)}
-        {bus(5, (i) => `M${106 + i * 2.4} 252 V200`)}
-        {bus(4, (i) => `M${7 + i * 2} 186 V${276 - i * 2} H100`)}
-        {bus(2, (i) => `M${112 + i * 6} 297 V303`)}
-        {bus(3, (i) => `M${134 + i * 2.4} 297 V${368 - i * 2} H${150 + i * 3} V371`)}
-        {/* Amp to speaker. */}
-        {bus(2, (i) => `M165 ${375 + i * 3} H${187 + i * 3}`)}
-        {/* Link port. */}
-        {bus(3, (i) => `M241 ${64 + i * 8} H234`)}
+        {BUSES.flatMap((bus) => bus.paths).map((d) => (
+          <path key={d} d={d} />
+        ))}
       </g>
       <g className={styles.powerTraces}>
-        <path d="M54 342 H70 V392 H150 V383" />
-        <path d="M30 343 V330 H92 V300" />
-        <path d="M24 362 V398 H64" />
+        {POWER.paths.map((d) => (
+          <path key={d} d={d} />
+        ))}
       </g>
+      <g className={styles.powerGlow} style={lit('power')}>
+        {POWER.paths.map((d) => (
+          <path key={d} d={d} />
+        ))}
+      </g>
+      {BUSES.map((bus, index) => (
+        <Signals key={index} bus={bus} index={index} />
+      ))}
+
+      <Glow activity="cpu" x={88} y={241} w={68} h={68} />
+      <Glow activity="wram" x={140} y={200} w={60} h={31} />
+      <Glow activity="vram" x={188} y={200} w={60} h={31} />
 
       {SCREWS.map(([x, y]) => (
         <g key={`${x},${y}`}>
@@ -159,10 +259,6 @@ export const Board = memo(function Board() {
           <rect x={x} y={y} width={vertical ? 1.8 : 3.4} height={vertical ? 3.4 : 1.8} rx={0.3} />
         </g>
       ))}
-
-      {/* Power switch slider, beside the OFF/ON print. */}
-      <rect className={styles.chip} x={76} y={4.6} width={26} height={3.4} rx={1.2} />
-      <rect fill="url(#board-metal)" x={90} y={5} width={8} height={2.6} rx={0.8} />
 
       {/* Cartridge connector: 32 gold contacts. */}
       <rect className={styles.connector} x={40} y={14.5} width={176} height={8} rx={1} />
@@ -183,6 +279,16 @@ export const Board = memo(function Board() {
       {row(6, (i) => (
         <path key={i} className={styles.ribbonLine} d={`M${6.4 + i * 1.25} 59 V181`} />
       ))}
+      {/* The line being drawn, slowed down from 60 sweeps a second to one you can follow. */}
+      <rect
+        className={styles.scan}
+        x={5}
+        y={58}
+        width={9}
+        height={18}
+        fill="url(#board-scan)"
+        style={lit('lcd')}
+      />
       <rect className={styles.socket} x={4} y={178} width={11} height={8} rx={0.8} />
 
       {/* Link port socket on the right edge. */}

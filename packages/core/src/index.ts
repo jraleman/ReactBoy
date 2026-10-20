@@ -23,6 +23,8 @@ export {
   type StepMode,
 } from './debug';
 export { IO } from './memory/memory-map';
+export type { BusActivity } from './activity';
+export type { SerialLink } from './serial';
 export { disassemble, type DisassembledInstruction } from './cpu/disassembler';
 export { OPCODES } from './cpu/opcodes';
 export { CB_OPCODES } from './cpu/cb-opcodes';

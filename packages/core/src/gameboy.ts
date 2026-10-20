@@ -1,3 +1,4 @@
+import type { BusActivity } from './activity';
 import { Apu } from './apu/apu';
 import { createCartridge, type CartridgeHeader, type Mbc } from './cartridge';
 import { RTC_FOOTER_SIZE } from './cartridge/rtc';
@@ -44,6 +45,12 @@ export class GameBoy implements Bus {
   onWrite: ((addr: number, value: number) => void) | null = null;
   /** Called after every CPU read (instruction fetches included) while set. */
   onRead: ((addr: number, value: number) => void) | null = null;
+  /** CPU reads and writes by 8 KiB region of the address space, for {@link takeActivity}. */
+  private readonly reads = new Float64Array(8);
+  private readonly writes = new Float64Array(8);
+  private idleCycles = 0;
+  /** {@link cycles} when activity was last taken. */
+  private activitySince = 0;
   /** Everything a save state covers, in the order it is written. */
   private readonly parts: readonly Stateful[];
   /** Global checksum (0x14E-0x14F), used to tell games apart in save states. */
@@ -120,6 +127,35 @@ export class GameBoy implements Bus {
   /** Writes memory for a debugger (see {@link Mmu.poke}); watchpoints don't see it. */
   poke(addr: number, value: number): void {
     this.mmu.poke(addr, value);
+  }
+
+  /** What the machine did since the last call (or power-on), and starts counting afresh. */
+  takeActivity(): BusActivity {
+    const { reads: r, writes: w } = this;
+    const activity: BusActivity = {
+      cycles: Math.max(0, this.cycles - this.activitySince),
+      idleCycles: this.idleCycles,
+      romReads: r[0]! + r[1]! + r[2]! + r[3]!,
+      mbcWrites: w[0]! + w[1]! + w[2]! + w[3]!,
+      vramReads: r[4]!,
+      vramWrites: w[4]!,
+      cartRamReads: r[5]!,
+      cartRamWrites: w[5]!,
+      wramReads: r[6]!,
+      wramWrites: w[6]!,
+      dmaTransfers: this.dma.starts,
+      serialTransfers: this.serial.transfers,
+      lcdc: this.ppu.lcdc,
+      nr52: this.apu.peek(0xff26),
+      sc: this.serial.readControl(),
+    };
+    r.fill(0);
+    w.fill(0);
+    this.idleCycles = 0;
+    this.dma.starts = 0;
+    this.serial.transfers = 0;
+    this.activitySince = this.cycles;
+    return activity;
   }
 
   setButton(button: ButtonId, pressed: boolean): void {
@@ -203,6 +239,7 @@ export class GameBoy implements Bus {
         : new SaveStateError('This save state is damaged.');
     }
     this.mbc.rtc?.catchUp((wallMs - savedAt) / 1000);
+    this.activitySince = this.cycles;
     // Cartridge RAM rolled back with the state; save it so the battery file agrees.
     this.batteryDirty = true;
   }
@@ -211,17 +248,21 @@ export class GameBoy implements Bus {
 
   read(addr: number): number {
     const value = this.mmu.read(addr);
+    this.reads[addr >>> 13]!++;
     if (this.onRead !== null) this.onRead(addr, value);
     return value;
   }
 
   write(addr: number, value: number): void {
     this.mmu.write(addr, value);
+    this.writes[addr >>> 13]!++;
     if (this.onWrite !== null) this.onWrite(addr, value);
   }
 
   tick(): void {
     this.cycles += 4;
+    const { cpu } = this;
+    if (cpu.halted || cpu.stopped || cpu.locked) this.idleCycles += 4;
     this.timer.tick();
     this.apu.tick();
     this.ppu.tick();

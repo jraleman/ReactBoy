@@ -4,6 +4,8 @@ import type { StateReader, StateWriter, Stateful } from './state';
 export class OamDma implements Stateful {
   register = 0xff;
   active = false;
+  /** Copies started, for {@link GameBoy.takeActivity}; not part of the saved state. */
+  starts = 0;
   private source = 0;
   private index = 0;
   private startDelay = 0;
@@ -20,6 +22,7 @@ export class OamDma implements Stateful {
    */
   start(value: number): void {
     this.register = value;
+    this.starts++;
     // Sources above 0xDFFF read from the echo of work RAM.
     this.source = (value >= 0xe0 ? value - 0x20 : value) << 8;
     this.index = 0;

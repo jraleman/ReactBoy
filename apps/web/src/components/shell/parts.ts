@@ -1,5 +1,6 @@
 import { CLOCK_HZ, IO, type CartridgeHeader, type DebugSnapshot } from '@reactboy/core';
 import type { EmulatorStatus } from '../../worker/client';
+import type { LinkStatus } from '../../worker/link';
 import { hex2, hex4 } from '../debugger/hex';
 import { INTERRUPT_NAMES } from '../debugger/io-registers';
 
@@ -10,6 +11,7 @@ export type PartId =
 export interface ReadoutContext {
   status: EmulatorStatus;
   header: CartridgeHeader | null;
+  link: LinkStatus;
   speed: number;
   fps: number;
   /** Null until the first inspection arrives, and with no game running. */
@@ -28,6 +30,8 @@ export interface Part {
   box: { x: number; y: number; w: number; h: number };
   /** What it does, in plain words. */
   about: string;
+  /** The same in one line, for the small sheet on phones. */
+  short: string;
   /** Live values, given a snapshot; parts that need none ignore it. */
   read: (context: ReadoutContext) => Reading[];
 }
@@ -101,6 +105,7 @@ export const PARTS: Part[] = [
     id: 'cartridge',
     name: 'Cartridge slot & MBC',
     box: { x: 36, y: 13, w: 184, h: 11 },
+    short: 'Where the game plugs in: its ROM, plus an MBC that swaps banks of it into view.',
     about:
       'The game plugs in here. A cartridge holds a ROM chip with the code and graphics. ' +
       'Bigger games add a Memory Bank Controller (MBC), because the CPU can only see 32 KiB ' +
@@ -127,6 +132,7 @@ export const PARTS: Part[] = [
     id: 'lcd',
     name: 'LCD ribbon & PPU',
     box: { x: 3, y: 56, w: 12, h: 128 },
+    short: 'Carries the pixels the picture processor (PPU) draws to the LCD, 60 times a second.',
     about:
       'The picture processor (PPU), built into the CPU chip, draws the screen one line at a ' +
       'time: 144 lines of 160 pixels, about 60 times a second. It builds each line from ' +
@@ -151,14 +157,25 @@ export const PARTS: Part[] = [
     id: 'link',
     name: 'Link port',
     box: { x: 241, y: 56, w: 12, h: 40 },
+    short: 'A serial port for trading and two-player games over a cable.',
     about:
       'A serial port for trading and two-player games, and for the Game Boy Printer. Each ' +
-      'transfer swaps a byte with the other side, one bit at a time at 8 kHz. No cable is ' +
-      'attached in ReactBoy, so every byte that comes in is $FF.',
-    read: ({ snapshot }) => {
-      if (!snapshot) return NO_GAME;
+      'transfer swaps a byte with the other side, one bit at a time at 8 kHz. Connect the ' +
+      'cable in the panel to link with another ReactBoy window; with nothing on the other ' +
+      'end, every byte that comes in is $FF.',
+    read: ({ snapshot, link }) => {
+      const cable: Reading = [
+        'Cable',
+        link === 'connected'
+          ? 'Connected'
+          : link === 'waiting'
+            ? 'Waiting for a partner'
+            : 'Not connected',
+      ];
+      if (!snapshot) return [cable, ...NO_GAME];
       const sc = snapshot.memory[IO.SC]!;
       return [
+        cable,
         ['Data', `$${hex2(snapshot.memory[IO.SB]!)}`],
         ['Transfer', sc & 0x80 ? 'In progress' : 'Idle'],
         ['Clock', sc & 0x01 ? 'This Game Boy' : 'The other Game Boy'],
@@ -169,6 +186,7 @@ export const PARTS: Part[] = [
     id: 'wram',
     name: 'Work RAM',
     box: { x: 148, y: 206, w: 44, h: 19 },
+    short: '8 KiB of scratch memory for the game’s variables and stack.',
     about:
       'The game’s 8 KiB of scratch memory, at $C000–$DFFF: its variables, the stack and, in ' +
       'most games, a copy of the sprite table that is sent to the PPU every frame. The ' +
@@ -191,6 +209,7 @@ export const PARTS: Part[] = [
     id: 'vram',
     name: 'Video RAM',
     box: { x: 196, y: 206, w: 44, h: 19 },
+    short: '8 KiB holding the graphics: tiles, and the maps that arrange them.',
     about:
       'Holds the graphics, at $8000–$9FFF: 384 tiles of 8×8 pixels, and two 32×32 maps that ' +
       'arrange them into backgrounds. The PPU reads it all the time; the CPU can only reach ' +
@@ -209,6 +228,8 @@ export const PARTS: Part[] = [
     id: 'cpu',
     name: 'CPU (DMG-CPU)',
     box: { x: 98, y: 251, w: 48, h: 48 },
+    short:
+      'The brain: runs the game’s code at 4.19 MHz, with the picture and sound hardware built in.',
     about:
       'The brain: a Sharp SM83 core, a cousin of the Z80 and Intel 8080, running at 4.19 MHz. ' +
       'The same chip also holds the picture processor, the sound generator, the timer, ' +
@@ -232,6 +253,7 @@ export const PARTS: Part[] = [
     id: 'crystal',
     name: 'Crystal oscillator',
     box: { x: 101, y: 302, w: 28, h: 14 },
+    short: 'Quartz ticking 4,194,304 times a second: the clock every part steps to.',
     about:
       'A sliver of quartz that vibrates 4,194,304 (2²²) times a second. It is the clock ' +
       'every part steps to: one frame takes 70,224 of its ticks, which is why the Game Boy ' +
@@ -250,6 +272,7 @@ export const PARTS: Part[] = [
     id: 'power',
     name: 'Power regulator',
     box: { x: 12, y: 330, w: 54, h: 50 },
+    short: 'Turns the batteries’ 6 V into the steady voltages the chips and LCD need.',
     about:
       'Turns the four AA batteries’ 6 V into the steady 5 V the chips run on, plus the ' +
       'negative voltage the LCD needs; the contrast wheel adjusts that one. As the ' +
@@ -263,6 +286,7 @@ export const PARTS: Part[] = [
     id: 'sound',
     name: 'Speaker & amp',
     box: { x: 177, y: 330, w: 54, h: 54 },
+    short: 'Mixes the four sound channels and drives the speaker.',
     about:
       'Four sound channels in the CPU chip (two square-wave pulses, a wave player and a noise ' +
       'generator) are mixed into left and right. A small amplifier then drives this ' +

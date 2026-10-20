@@ -5,6 +5,7 @@ import {
   SCREEN_WIDTH,
   type Breakpoint,
   type BreakReason,
+  type BusActivity,
   type ButtonId,
   type CartridgeHeader,
   type DebugSnapshot,
@@ -18,9 +19,11 @@ import { openStore } from '../storage/idb';
 import { romKey } from '../storage/rom-key';
 import type { GameStore, ManualSlot, RecentGame, StateInfo, StoredSymbols } from '../storage/store';
 import { createEmulatorHost } from './host';
+import type { LinkStatus } from './link';
 import type { ClientMessage, DebugReport, HostMessage, Post } from './protocol';
 
-export type EmulatorStatus = 'empty' | 'running' | 'paused' | 'error';
+/** 'off' is a loaded game with the power switch off; switching on boots it afresh. */
+export type EmulatorStatus = 'empty' | 'running' | 'paused' | 'off' | 'error';
 
 /** Sound waits for a user gesture ('locked'), then plays, or the browser can't play it. */
 export type SoundStatus = 'locked' | 'on' | 'unavailable';
@@ -55,6 +58,8 @@ export interface EmulatorState {
   /** False when nothing outlives the page (IndexedDB unavailable); null until known. */
   persistent: boolean | null;
   sound: SoundStatus;
+  /** The link cable to other ReactBoy windows. */
+  link: LinkStatus;
 }
 
 /** The debugger's view, kept apart from {@link EmulatorState} so only it re-renders. */
@@ -138,8 +143,14 @@ export class EmulatorClient {
   private readonly debugListeners = new Set<() => void>();
   private probeState = NO_PROBE;
   private probeTime = 0;
-  private probing = false;
+  /** Open {@link probe} calls. */
+  private probes = 0;
   private readonly probeListeners = new Set<() => void>();
+  /** Open {@link watchActivity} calls, and what they see. */
+  private watchers = 0;
+  private activity: BusActivity | null = null;
+  private lastActivity = 0;
+  private readonly activityListeners = new Set<() => void>();
   private lastInspect = 0;
   private readonly send: Post<ClientMessage>;
   private readonly worker: Worker | null;
@@ -204,6 +215,7 @@ export class EmulatorClient {
       notice: null,
       persistent: null,
       sound: 'locked',
+      link: 'off',
     };
     this.audio = new AudioOutput((ready) => {
       this.update({ sound: ready ? 'on' : 'unavailable' });
@@ -254,6 +266,18 @@ export class EmulatorClient {
     this.probeListeners.forEach((listener) => listener());
   }
 
+  subscribeActivity = (listener: () => void): (() => void) => {
+    this.activityListeners.add(listener);
+    return () => this.activityListeners.delete(listener);
+  };
+
+  getActivity = (): BusActivity | null => this.activity;
+
+  private updateActivity(activity: BusActivity | null): void {
+    this.activity = activity;
+    this.activityListeners.forEach((listener) => listener());
+  }
+
   private notify(notice: string): void {
     clearTimeout(this.noticeTimer);
     this.update({ notice });
@@ -301,6 +325,22 @@ export class EmulatorClient {
     if (this.debugState.open) this.redraw();
   }
 
+  /**
+   * The case's power switch. Off stops everything, as on the real console: what wasn't saved
+   * by the game is lost when it comes back on, which boots it afresh (battery saves stay).
+   */
+  setPower(on: boolean): void {
+    const { status } = this.state;
+    if (on) {
+      if (status === 'off') this.send({ type: 'reset' });
+      return;
+    }
+    if (status !== 'running' && status !== 'paused') return;
+    if (status === 'running') this.halt();
+    this.update({ status: 'off' });
+    this.audio.clear();
+  }
+
   /** Pauses where the game is, e.g. at a breakpoint. */
   private halt(): void {
     this.update({ status: 'paused', fps: 0 });
@@ -342,19 +382,38 @@ export class EmulatorClient {
   }
 
   /**
-   * Keeps {@link getProbeSnapshot} fresh while someone looks at the case's parts. Unlike the
-   * debugger it arms nothing, so the game runs exactly as it would otherwise.
+   * Keeps {@link getProbeSnapshot} fresh until the returned function is called, for views of
+   * the case's insides; several can look at once. Unlike the debugger it arms nothing, so
+   * the game runs exactly as it would otherwise.
    */
-  setProbing(probing: boolean): void {
-    if (probing === this.probing) return;
-    this.probing = probing;
-    if (probing) this.redraw();
-    else this.updateProbe(NO_PROBE);
+  probe(): () => void {
+    if (this.probes++ === 0) this.redraw();
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      if (--this.probes === 0) this.updateProbe(NO_PROBE);
+    };
+  }
+
+  /**
+   * Keeps {@link getActivity} reporting what the machine does, ~10 times a second while it
+   * runs, until the returned function is called. Far cheaper than {@link probe}: counters,
+   * not a copy of memory.
+   */
+  watchActivity(): () => void {
+    this.watchers++;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      if (--this.watchers === 0) this.updateActivity(null);
+    };
   }
 
   /** Frames are asked to come with a snapshot. */
   private get inspecting(): boolean {
-    return this.debugState.open || this.probing;
+    return this.debugState.open || this.probes > 0;
   }
 
   setBreakpoints(breakpoints: Breakpoint[]): void {
@@ -393,6 +452,11 @@ export class EmulatorClient {
   private syncDebugger(): void {
     const { open, breakpoints, watchpoints } = this.debugState;
     this.send({ type: 'debug', enabled: open, breakpoints, watchpoints });
+  }
+
+  /** Plugs the link cable to other ReactBoy windows on this device in, or pulls it out. */
+  setLink(enabled: boolean): void {
+    this.send({ type: 'link', enabled });
   }
 
   setSpeed(speed: number): void {
@@ -641,7 +705,9 @@ export class EmulatorClient {
       this.inFlight = true;
       const inspect = this.inspecting && now - this.lastInspect >= INSPECT_MS;
       if (inspect) this.lastInspect = now;
-      this.send({ type: 'run', frames, inspect });
+      const activity = this.watchers > 0 && now - this.lastActivity >= INSPECT_MS;
+      if (activity) this.lastActivity = now;
+      this.send({ type: 'run', frames, inspect, activity });
       this.framesThisSecond += frames;
     }
 
@@ -680,6 +746,7 @@ export class EmulatorClient {
         });
         // Cycle counts restart with the game; don't compare across the reload.
         this.updateProbe(NO_PROBE);
+        this.updateActivity(null);
         this.audio.clear();
         this.startLoop();
         this.syncAudio();
@@ -698,6 +765,7 @@ export class EmulatorClient {
       case 'frame':
         this.inFlight = false;
         if (message.debug) this.inspected(message.debug);
+        if (message.activity && this.watchers > 0) this.updateActivity(message.activity);
         if (message.audio) this.audio.push(new Float32Array(message.audio));
         if (!message.pixels) break;
         if (this.canvas) {
@@ -707,6 +775,15 @@ export class EmulatorClient {
         }
         this.send({ type: 'recycle', pixels: message.pixels }, [message.pixels]);
         break;
+      case 'link': {
+        const was = this.state.link;
+        this.update({ link: message.status });
+        if (message.status === 'connected') this.notify('Link cable connected to another window.');
+        else if (was === 'connected' && message.status === 'waiting') {
+          this.notify('The other window left the link. Waiting for another.');
+        }
+        break;
+      }
       case 'battery': {
         const battery = { data: message.data, updated: Date.now() };
         void this.useStore((store) => store.putBattery(message.key, battery));
@@ -720,7 +797,7 @@ export class EmulatorClient {
   }
 
   private inspected({ snapshot, stop, stepping }: DebugReport): void {
-    if (this.probing) this.probed(snapshot);
+    if (this.probes > 0) this.probed(snapshot);
     if (!this.debugState.open) return;
     this.updateDebug({ snapshot, previous: this.debugState.snapshot, stepping, stop });
     if (stop) {

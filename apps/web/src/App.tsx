@@ -7,6 +7,7 @@ import { StartSelect } from './components/controls/StartSelect';
 import { Panel } from './components/panel/Panel';
 import { Screen } from './components/screen/Screen';
 import { GameBoyShell } from './components/shell/GameBoyShell';
+import { usePartsView } from './components/shell/partsView';
 import { UpdateBanner } from './components/update/UpdateBanner';
 import { useDeviceScale, WIDE_QUERY } from './hooks/useDeviceScale';
 import { useEmulatorClient, useEmulatorState } from './hooks/useEmulator';
@@ -32,6 +33,7 @@ export function App() {
   /** Where focus goes when the debugger opens or closes, so it isn't lost with the panel. */
   const [debuggerToggled, setDebuggerToggled] = useState(false);
   const palette = PALETTES[settings.palette] ?? PALETTES.classic;
+  const view = usePartsView();
 
   useKeyboard(client, settings.keymap);
   useShortcuts(client);
@@ -91,6 +93,11 @@ export function App() {
           theme={settings.shell}
           palette={palette}
           powered={status === 'running' || status === 'paused'}
+          canPower={header !== null && status !== 'error'}
+          onPower={(on) => client.setPower(on)}
+          contrast={settings.contrast}
+          onContrast={(contrast) => updateSettings({ contrast })}
+          view={view}
           screen={<Screen palette={palette} />}
           dpad={<DPad onButton={onTouch} pressed={pressed} />}
           actions={<ActionButtons onButton={onTouch} pressed={pressed} />}
@@ -116,6 +123,7 @@ export function App() {
             settings={settings}
             onSettings={updateSettings}
             onLoad={load}
+            onTour={view.startTour}
             focusDebugger={debuggerToggled}
             onDebugger={() => {
               setDebuggerToggled(true);
@@ -127,6 +135,7 @@ export function App() {
       <p className="visually-hidden" role="status" aria-live="polite">
         {status === 'running' && header ? `Playing ${header.title}` : ''}
         {status === 'paused' ? 'Paused' : ''}
+        {status === 'off' ? 'Switched off' : ''}
         {notice ? ` ${notice}` : ''}
       </p>
       <UpdateBanner />

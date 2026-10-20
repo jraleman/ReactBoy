@@ -26,13 +26,15 @@ interface Props {
   onSettings: (patch: Partial<Settings>) => void;
   onLoad: (file: File) => void;
   onDebugger: () => void;
+  /** Starts the guided tour of a clear case's insides. */
+  onTour: () => void;
   /** Focus the debugger button on mount, because the debugger just closed. */
   focusDebugger?: boolean;
 }
 
-export function Panel({ settings, onSettings, onLoad, onDebugger, focusDebugger }: Props) {
+export function Panel({ settings, onSettings, onLoad, onDebugger, onTour, focusDebugger }: Props) {
   const client = useEmulatorClient();
-  const { status, header, error, fps, notice, sound } = useEmulatorState();
+  const { status, header, error, fps, notice, sound, link } = useEmulatorState();
   const fileInput = useRef<HTMLInputElement>(null);
   const id = useId();
   const loaded = status === 'running' || status === 'paused';
@@ -86,14 +88,20 @@ export function Panel({ settings, onSettings, onLoad, onDebugger, focusDebugger 
 
       <section className={styles.section} aria-label="Playback">
         <div className={styles.row}>
-          <button
-            type="button"
-            className={styles.button}
-            disabled={!loaded}
-            onClick={() => (status === 'running' ? client.pause() : client.play())}
-          >
-            {status === 'paused' ? 'Resume' : 'Pause'}
-          </button>
+          {status === 'off' ? (
+            <button type="button" className={styles.button} onClick={() => client.setPower(true)}>
+              Power on
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={styles.button}
+              disabled={!loaded}
+              onClick={() => (status === 'running' ? client.pause() : client.play())}
+            >
+              {status === 'paused' ? 'Resume' : 'Pause'}
+            </button>
+          )}
           <button
             type="button"
             className={styles.button}
@@ -127,6 +135,11 @@ export function Panel({ settings, onSettings, onLoad, onDebugger, focusDebugger 
             ))}
           </div>
         </fieldset>
+        {status === 'off' && (
+          <p className={styles.note}>
+            Switched off. Turning it back on starts the game afresh; battery saves are kept.
+          </p>
+        )}
         {status === 'running' && (
           <p className={styles.fps} aria-hidden="true">
             {fps} fps
@@ -237,11 +250,64 @@ export function Panel({ settings, onSettings, onLoad, onDebugger, focusDebugger 
             ))}
           </div>
           {isClear(settings.shell) && (
-            <p className={styles.note}>
-              See-through case: click or tap a chip on the board to see what it does.
-            </p>
+            <>
+              <p className={styles.note}>
+                See-through case: click or tap a chip on the board to see what it does.
+              </p>
+              <div className={styles.row}>
+                <button type="button" className={styles.button} onClick={onTour}>
+                  Take the tour
+                </button>
+              </div>
+            </>
           )}
         </fieldset>
+        <div className={styles.volume}>
+          <label htmlFor={`${id}-contrast`} className={styles.legend}>
+            Contrast
+          </label>
+          <input
+            id={`${id}-contrast`}
+            type="range"
+            className={styles.slider}
+            min={0}
+            max={100}
+            value={Math.round(settings.contrast * 100)}
+            aria-valuetext={`${Math.round(settings.contrast * 100)}%`}
+            onChange={(event) => onSettings({ contrast: Number(event.target.value) / 100 })}
+          />
+          <button
+            type="button"
+            className={styles.button}
+            disabled={settings.contrast === 0.5}
+            onClick={() => onSettings({ contrast: 0.5 })}
+          >
+            Reset
+          </button>
+        </div>
+      </section>
+
+      <section className={styles.section} aria-labelledby={`${id}-link`}>
+        <h2 id={`${id}-link`} className={styles.heading}>
+          Link cable
+        </h2>
+        <div className={styles.row}>
+          <button
+            type="button"
+            className={styles.button}
+            aria-pressed={link !== 'off'}
+            onClick={() => client.setLink(link === 'off')}
+          >
+            {link === 'off' ? 'Connect cable' : 'Disconnect cable'}
+          </button>
+        </div>
+        <p className={styles.note}>
+          {link === 'off'
+            ? 'Trade and play two-player games with another ReactBoy window on this device.'
+            : link === 'waiting'
+              ? 'Waiting for another window: open ReactBoy in a second window and connect its cable too.'
+              : 'Connected to another window. Keep both in view: a hidden window pauses its game.'}
+        </p>
       </section>
 
       <section className={styles.section} aria-labelledby={`${id}-keys`}>

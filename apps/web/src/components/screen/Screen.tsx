@@ -20,7 +20,7 @@ export function Screen({ palette }: { palette: Palette }) {
   const showGame = status === 'running' || status === 'paused';
 
   return (
-    <div className={styles.screen} style={lcdColors}>
+    <div className={styles.screen} style={lcdColors} data-off={status === 'off' || undefined}>
       <canvas
         ref={attach}
         className={styles.canvas}

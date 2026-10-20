@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { IO, toAbgr, type DebugSnapshot, type Palette } from '@reactboy/core';
 import { useEmulatorClient, useEmulatorState, useProbeState } from '../../hooks/useEmulator';
 import { isEditable } from '../../hooks/useKeyboard';
@@ -11,21 +11,22 @@ interface Props {
   palette: Palette;
   /** Beside the device, or over its controls; never over the screen. */
   placement: 'side' | 'sheet';
+  /** Set while the guided tour shows this part. */
+  tour?: { step: number; total: number; story: string; onStep: (step: number) => void };
   onClose: () => void;
 }
 
 /** What a part does, with live values from the machine while it is open. */
-export function PartCard({ part, palette, placement, onClose }: Props) {
+export function PartCard({ part, palette, placement, tour, onClose }: Props) {
   const client = useEmulatorClient();
-  const { status, header, speed, fps } = useEmulatorState();
+  const { status, header, speed, fps, link } = useEmulatorState();
   const { snapshot, previous, elapsed } = useProbeState();
   const heading = useRef<HTMLHeadingElement>(null);
   const id = useId();
+  // The sheet over the controls is short: it starts with the one-line version.
+  const [more, setMore] = useState(placement === 'side');
 
-  useEffect(() => {
-    client.setProbing(true);
-    return () => client.setProbing(false);
-  }, [client]);
+  useEffect(() => client.probe(), [client]);
 
   // A new part takes focus, so a keyboard user lands on what they opened.
   useEffect(() => heading.current?.focus(), [part.id]);
@@ -38,7 +39,7 @@ export function PartCard({ part, palette, placement, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const readings = part.read({ status, header, speed, fps, snapshot, previous, elapsed });
+  const readings = part.read({ status, header, link, speed, fps, snapshot, previous, elapsed });
 
   return (
     <section
@@ -56,7 +57,21 @@ export function PartCard({ part, palette, placement, onClose }: Props) {
           ×
         </button>
       </header>
-      <p className={styles.cardAbout}>{part.about}</p>
+      {tour && <p className={styles.tourStory}>{tour.story}</p>}
+      <p className={styles.cardAbout} id={`${id}-about`}>
+        {more ? part.about : part.short}
+      </p>
+      {placement === 'sheet' && (
+        <button
+          type="button"
+          className={styles.cardMore}
+          aria-expanded={more}
+          aria-controls={`${id}-about`}
+          onClick={() => setMore(!more)}
+        >
+          {more ? 'Less' : 'More'}
+        </button>
+      )}
       <dl className={styles.readings}>
         {readings.map(([label, value]) => (
           <div key={label} className={styles.reading}>
@@ -67,6 +82,35 @@ export function PartCard({ part, palette, placement, onClose }: Props) {
       </dl>
       {snapshot && part.id === 'wram' && <WramPicture snapshot={snapshot} palette={palette} />}
       {snapshot && part.id === 'vram' && <TilePicture snapshot={snapshot} palette={palette} />}
+      {tour && (
+        <nav className={styles.tourNav} aria-label="Tour">
+          <button
+            type="button"
+            className={styles.tourButton}
+            disabled={tour.step === 0}
+            onClick={() => tour.onStep(tour.step - 1)}
+          >
+            Back
+          </button>
+          <span className={styles.tourCount}>
+            {tour.step + 1} of {tour.total}
+          </span>
+          {tour.step + 1 < tour.total ? (
+            <button
+              type="button"
+              className={styles.tourButton}
+              data-primary
+              onClick={() => tour.onStep(tour.step + 1)}
+            >
+              Next
+            </button>
+          ) : (
+            <button type="button" className={styles.tourButton} data-primary onClick={onClose}>
+              Finish
+            </button>
+          )}
+        </nav>
+      )}
     </section>
   );
 }

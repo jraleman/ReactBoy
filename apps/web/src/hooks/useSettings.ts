@@ -8,6 +8,8 @@ export type { ShellTheme };
 export interface Settings {
   palette: PaletteName;
   shell: ShellTheme;
+  /** The LCD contrast wheel, 0-1; 0.5 shows the palette as it is. */
+  contrast: number;
   speed: number;
   /** 0-1. */
   volume: number;
@@ -26,6 +28,7 @@ const KEY = 'reactboy:settings';
 const DEFAULTS: Settings = {
   palette: 'classic',
   shell: 'grey',
+  contrast: 0.5,
   speed: 1,
   volume: 0.8,
   muted: false,
@@ -52,6 +55,7 @@ function load(): Settings {
     if (!isPadmap(settings.padmap)) settings.padmap = DEFAULTS.padmap;
     if (!(settings.palette in PALETTES)) settings.palette = DEFAULTS.palette;
     if (!isShellTheme(settings.shell)) settings.shell = DEFAULTS.shell;
+    if (!(settings.contrast >= 0 && settings.contrast <= 1)) settings.contrast = DEFAULTS.contrast;
     return settings;
   } catch {
     return DEFAULTS;

@@ -7,6 +7,11 @@
   box-shadow: inset 0 0 calc(var(--u) * 3) rgb(0 0 0 / 0.25);
 }
 
+/* An unpowered LCD: no pixels, and a greyer green than a lit one. */
+.screen[data-off] {
+  background: color-mix(in srgb, var(--lcd-0) 70%, #8e9484);
+}
+
 .canvas {
   display: block;
   width: 100%;

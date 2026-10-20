@@ -517,3 +517,7 @@ kbd {
 .swatches + .note {
   margin-top: 10px;
 }
+
+.volume .legend {
+  margin: 0;
+}
