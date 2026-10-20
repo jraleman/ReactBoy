@@ -1,0 +1,97 @@
+.screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--lcd-0);
+  box-shadow: inset 0 0 calc(var(--u) * 3) rgb(0 0 0 / 0.25);
+}
+
+/* An unpowered LCD: no pixels, and a greyer green than a lit one. */
+.screen[data-off] {
+  background: color-mix(in srgb, var(--lcd-0) 70%, #8e9484);
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.canvas[hidden] {
+  display: none;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 10);
+  padding: calc(var(--u) * 12);
+  text-align: center;
+  color: var(--lcd-3);
+  background: var(--lcd-0);
+}
+
+/* The one piece of ambient motion: the boot logo scrolling down, as the hardware does. */
+.logo {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: calc(var(--u) * 20);
+  font-weight: 800;
+  font-style: italic;
+  font-stretch: 112%;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  animation: boot-drop 1.6s steps(24, end) both;
+}
+
+.hint {
+  margin: 0;
+  max-width: 28ch;
+  font-size: calc(var(--u) * 7);
+  line-height: 1.35;
+  color: var(--lcd-2);
+  animation: appear 0.01s 1.7s both;
+}
+
+.error {
+  margin: 0;
+  font-size: calc(var(--u) * 7.5);
+  line-height: 1.35;
+}
+
+.errorTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: calc(var(--u) * 10);
+  font-weight: 800;
+  font-style: italic;
+}
+
+@keyframes boot-drop {
+  from {
+    transform: translateY(calc(var(--u) * -90));
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logo,
+  .hint {
+    animation: none;
+  }
+}

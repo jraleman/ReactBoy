@@ -1,0 +1,77 @@
+:root {
+  color-scheme: light dark;
+  --page: #dcdae3;
+  --page-deep: #cfccd8;
+  --ink: #26243a;
+  --ink-muted: #625f78;
+  --rule: #b9b5c6;
+  --surface: #e9e7ef;
+  --accent: #9a2257;
+  --accent-ink: #ffffff;
+  --focus: #2f5bd3;
+  --font-display: 'Archivo Variable', 'Archivo', system-ui, sans-serif;
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --page: #17161f;
+    --page-deep: #100f16;
+    --ink: #e9e7f2;
+    --ink-muted: #a19eb5;
+    --rule: #34313f;
+    --surface: #211f2b;
+    --accent: #d24a86;
+    --accent-ink: #17161f;
+    --focus: #8fb0ff;
+  }
+}
+
+:root[data-theme='dark'] {
+  --page: #17161f;
+  --page-deep: #100f16;
+  --ink: #e9e7f2;
+  --ink-muted: #a19eb5;
+  --rule: #34313f;
+  --surface: #211f2b;
+  --accent: #d24a86;
+  --accent-ink: #17161f;
+  --focus: #8fb0ff;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: radial-gradient(ellipse at 50% 40%, var(--page) 40%, var(--page-deep));
+  background-attachment: fixed;
+  color: var(--ink);
+  font: 15px/1.5 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  /* Long-press and double-tap zoom get in the way of the on-screen buttons. */
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
