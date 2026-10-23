@@ -25,9 +25,6 @@ export interface Cartridge {
  */
 export function createCartridge(rom: Uint8Array, now: () => number): Cartridge {
   const header = parseHeader(rom);
-  if (header.cgbFlag === 0xc0) {
-    throw new UnsupportedCartridgeError(`"${header.title}" requires a Game Boy Color.`);
-  }
   const ram = new Uint8Array(header.ramSize).fill(0xff);
   let mbc: Mbc;
   switch (header.mapper) {

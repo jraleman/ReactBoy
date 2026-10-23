@@ -1,6 +1,11 @@
 import type { BusActivity } from './activity';
 import { Apu } from './apu/apu';
-import { createCartridge, type CartridgeHeader, type Mbc } from './cartridge';
+import {
+  createCartridge,
+  UnsupportedCartridgeError,
+  type CartridgeHeader,
+  type Mbc,
+} from './cartridge';
 import { RTC_FOOTER_SIZE } from './cartridge/rtc';
 import { CYCLES_PER_FRAME } from './constants';
 import { Cpu, type Bus } from './cpu/cpu';
@@ -8,6 +13,7 @@ import { OamDma } from './dma';
 import { Interrupts } from './interrupts';
 import { Joypad, type ButtonId } from './joypad';
 import { Mmu } from './memory/mmu';
+import type { Model } from './model';
 import type { Palette } from './ppu/palette';
 import { Ppu } from './ppu/ppu';
 import { Serial } from './serial';
@@ -16,18 +22,29 @@ import { Timer } from './timer';
 
 /** "RBST", little-endian. */
 const STATE_MAGIC = 0x54534252;
-/** Bump whenever any component's saved layout changes; older states are then rejected. */
-export const STATE_VERSION = 2;
+/**
+ * Bump whenever any component's saved layout changes, and have its readState handle the
+ * versions back to {@link OLDEST_STATE_VERSION}; older states are rejected.
+ */
+export const STATE_VERSION = 3;
+/** Version 2 states are all DMG: version 3 added the model and Game Boy Color registers. */
+const OLDEST_STATE_VERSION = 2;
 
 export interface GameBoyOptions {
   palette?: Palette;
+  /**
+   * The console to be; 'dmg' unless given. Color-only games need 'cgb'. Its banked memory
+   * and registers are emulated, but not yet its color graphics.
+   */
+  model?: Model;
 }
 
 /**
- * A complete DMG. The CPU drives the clock: every M-cycle it spends, {@link tick} advances
- * the timer, PPU, DMA and serial port by the same amount.
+ * A complete DMG or Game Boy Color. The CPU drives the clock: every M-cycle it spends,
+ * {@link tick} advances the timer, PPU, DMA and serial port by the same amount.
  */
 export class GameBoy implements Bus {
+  readonly model: Model;
   readonly header: CartridgeHeader;
   readonly cpu: Cpu;
   readonly mmu: Mmu;
@@ -58,6 +75,10 @@ export class GameBoy implements Bus {
 
   constructor(rom: Uint8Array, options: GameBoyOptions = {}) {
     const cartridge = createCartridge(rom, () => this.cycles);
+    this.model = options.model ?? 'dmg';
+    if (cartridge.header.cgbFlag === 0xc0 && this.model !== 'cgb') {
+      throw new UnsupportedCartridgeError(`"${cartridge.header.title}" requires a Game Boy Color.`);
+    }
     this.header = cartridge.header;
     this.mbc = cartridge.mbc;
     this.interrupts = new Interrupts();
@@ -67,19 +88,22 @@ export class GameBoy implements Bus {
     this.timer = new Timer(this.interrupts, () => this.apu.clockFrameSequencer());
     this.joypad = new Joypad(this.interrupts);
     this.serial = new Serial(this.interrupts, () => this.timer.counter);
-    this.mmu = new Mmu({
-      mbc: this.mbc,
-      ppu: this.ppu,
-      apu: this.apu,
-      timer: this.timer,
-      joypad: this.joypad,
-      serial: this.serial,
-      interrupts: this.interrupts,
-    });
+    this.mmu = new Mmu(
+      {
+        mbc: this.mbc,
+        ppu: this.ppu,
+        apu: this.apu,
+        timer: this.timer,
+        joypad: this.joypad,
+        serial: this.serial,
+        interrupts: this.interrupts,
+      },
+      this.model === 'cgb',
+    );
     this.dma = new OamDma((addr) => this.mmu.read(addr), this.ppu.oam);
     this.mmu.attachDma(this.dma);
     this.cpu = new Cpu(this, this.interrupts);
-    this.cpu.reset(this.header.headerChecksum);
+    this.cpu.reset(this.model, this.header.headerChecksum);
     this.romChecksum = ((rom[0x14e] ?? 0) << 8) | (rom[0x14f] ?? 0);
     this.parts = [
       this.cpu,
@@ -205,6 +229,7 @@ export class GameBoy implements Bus {
     w.u16(STATE_VERSION);
     w.u16(this.romChecksum);
     w.u8(this.header.headerChecksum);
+    w.u8(this.model === 'cgb' ? 1 : 0);
     w.f64(wallMs);
     w.f64(this.cycles);
     for (const part of this.parts) part.writeState(w);
@@ -213,18 +238,25 @@ export class GameBoy implements Bus {
 
   /**
    * Restores a state from {@link serialize}. On failure the machine is left as it was.
-   * @throws SaveStateError if the data is damaged, from another game or another version
+   * @throws SaveStateError if the data is damaged, from another game, model or version
    */
   deserialize(data: Uint8Array, wallMs = Date.now()): void {
     const r = new StateReader(data);
     if (data.length < 4 || r.u32() !== STATE_MAGIC) {
       throw new SaveStateError('This is not a ReactBoy save state.');
     }
-    if (r.u16() !== STATE_VERSION) {
+    r.version = r.u16();
+    if (r.version < OLDEST_STATE_VERSION || r.version > STATE_VERSION) {
       throw new SaveStateError('This save state is from an incompatible version of ReactBoy.');
     }
     if (r.u16() !== this.romChecksum || r.u8() !== this.header.headerChecksum) {
       throw new SaveStateError('This save state belongs to a different game.');
+    }
+    const model: Model = r.version >= 3 && r.u8() === 1 ? 'cgb' : 'dmg';
+    if (model !== this.model) {
+      throw new SaveStateError(
+        `This save state is from a ${model === 'cgb' ? 'Game Boy Color' : 'Game Boy'}.`,
+      );
     }
     const savedAt = r.f64();
     const backup = this.serialize(wallMs);

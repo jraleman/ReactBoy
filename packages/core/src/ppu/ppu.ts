@@ -49,8 +49,8 @@ const MAX_SPRITES_PER_LINE = 10;
  * (that needs a pixel FIFO).
  */
 export class Ppu implements Stateful {
-  /** 8 KiB VRAM. A CGB would add a second bank. */
-  readonly vram = new Uint8Array(0x2000);
+  /** VRAM: two 8 KiB banks, of which a DMG has only the first. */
+  readonly vram = new Uint8Array(0x4000);
   readonly oam = new Uint8Array(0xa0);
   /** Last completed frame, RGBA. */
   readonly framebuffer = new Uint8ClampedArray(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
@@ -328,7 +328,13 @@ export class Ppu implements Stateful {
   }
 
   readState(r: StateReader): void {
-    r.bytes(this.vram);
+    if (r.version < 3) {
+      // Version 2 states predate the second bank.
+      r.bytes(this.vram.subarray(0, 0x2000));
+      this.vram.fill(0, 0x2000);
+    } else {
+      r.bytes(this.vram);
+    }
     r.bytes(this.oam);
     r.bytes(this.backShades);
     r.bytes(this.frontShades);

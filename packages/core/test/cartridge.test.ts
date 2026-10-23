@@ -33,10 +33,7 @@ describe('parseHeader', () => {
 });
 
 describe('createCartridge', () => {
-  it('rejects CGB-only and unknown cartridges', () => {
-    const cgb = makeRom([]);
-    cgb[0x143] = 0xc0;
-    expect(() => createCartridge(cgb, now)).toThrow(UnsupportedCartridgeError);
+  it('rejects unknown cartridges', () => {
     expect(() => createCartridge(makeRom([], { type: 0xfc }), now)).toThrow(
       UnsupportedCartridgeError,
     );

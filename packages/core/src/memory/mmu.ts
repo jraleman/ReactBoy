@@ -20,17 +20,31 @@ export interface MmuDevices {
   dma: OamDma;
 }
 
-/** Routes the 16-bit address space to cartridge, RAM and hardware registers. */
+/**
+ * Routes the 16-bit address space to cartridge, RAM and hardware registers. On a Game Boy
+ * Color, VBK and SVBK choose the VRAM bank at 0x8000 and the WRAM bank at 0xD000.
+ */
 export class Mmu implements Stateful {
-  /** 8 x 4 KiB banks so CGB banking can slot in; a DMG only uses banks 0 and 1. */
+  /** 8 x 4 KiB banks; a DMG only has banks 0 and 1. */
   readonly wram = new Uint8Array(0x8000);
   readonly hram = new Uint8Array(0x7f);
   /** Set by any write to cartridge RAM; cleared once battery RAM has been saved. */
   cartRamDirty = false;
+  /** WRAM bank at 0xD000-0xDFFF, 1-7. */
   private wramBank = 1;
+  /** VRAM bank at 0x8000-0x9FFF, 0-1. */
+  private vramBank = 0;
+  /**
+   * 0xFF72-0xFF75 on a Game Boy Color: registers with no known function that still hold
+   * what is written (only bits 4-6 of 0xFF75).
+   */
+  private readonly spare = new Uint8Array(4);
   private dma!: OamDma;
 
-  constructor(private readonly devices: Omit<MmuDevices, 'dma'>) {}
+  constructor(
+    private readonly devices: Omit<MmuDevices, 'dma'>,
+    private readonly cgb = false,
+  ) {}
 
   /** The DMA unit reads through the MMU, so it is attached after construction. */
   attachDma(dma: OamDma): void {
@@ -40,7 +54,7 @@ export class Mmu implements Stateful {
   read(addr: number): number {
     const d = this.devices;
     if (addr < 0x8000) return d.mbc.readRom(addr);
-    if (addr < 0xa000) return d.ppu.vramReadable() ? d.ppu.vram[addr - 0x8000]! : 0xff;
+    if (addr < 0xa000) return d.ppu.vramReadable() ? d.ppu.vram[this.vramOffset(addr)]! : 0xff;
     if (addr < 0xc000) return d.mbc.readRam(addr);
     if (addr < 0xfe00) return this.wram[this.wramOffset(addr)]!;
     if (addr < 0xfea0) {
@@ -57,7 +71,7 @@ export class Mmu implements Stateful {
    */
   peek(addr: number): number {
     const d = this.devices;
-    if (addr >= 0x8000 && addr < 0xa000) return d.ppu.vram[addr - 0x8000]!;
+    if (addr >= 0x8000 && addr < 0xa000) return d.ppu.vram[this.vramOffset(addr)]!;
     if (addr >= 0xfe00 && addr < 0xfea0) return d.ppu.oam[addr - 0xfe00]!;
     if (addr >= 0xff10 && addr < 0xff40) return d.apu.peek(addr);
     return this.read(addr);
@@ -71,7 +85,7 @@ export class Mmu implements Stateful {
   poke(addr: number, value: number): void {
     const d = this.devices;
     if (addr < 0x8000 || (addr >= 0xfea0 && addr < 0xff00)) return;
-    if (addr < 0xa000) d.ppu.vram[addr - 0x8000] = value;
+    if (addr < 0xa000) d.ppu.vram[this.vramOffset(addr)] = value;
     else if (addr >= 0xfe00 && addr < 0xfea0) d.ppu.oam[addr - 0xfe00] = value;
     else this.write(addr, value);
   }
@@ -80,7 +94,7 @@ export class Mmu implements Stateful {
     const d = this.devices;
     if (addr < 0x8000) d.mbc.writeRom(addr, value);
     else if (addr < 0xa000) {
-      if (d.ppu.vramWritable()) d.ppu.vram[addr - 0x8000] = value;
+      if (d.ppu.vramWritable()) d.ppu.vram[this.vramOffset(addr)] = value;
     } else if (addr < 0xc000) {
       d.mbc.writeRam(addr, value);
       this.cartRamDirty = true;
@@ -97,12 +111,26 @@ export class Mmu implements Stateful {
     w.bytes(this.wram);
     w.bytes(this.hram);
     w.u8(this.wramBank);
+    w.u8(this.vramBank);
+    w.bytes(this.spare);
   }
 
   readState(r: StateReader): void {
     r.bytes(this.wram);
     r.bytes(this.hram);
-    this.wramBank = r.u8();
+    this.wramBank = r.u8() & 7 || 1;
+    // Version 2 states predate the Game Boy Color's registers.
+    if (r.version < 3) {
+      this.vramBank = 0;
+      this.spare.fill(0);
+    } else {
+      this.vramBank = r.u8() & 1;
+      r.bytes(this.spare);
+    }
+  }
+
+  private vramOffset(addr: number): number {
+    return this.vramBank * 0x2000 + (addr - 0x8000);
   }
 
   /** Echo RAM (0xE000-0xFDFF) mirrors 0xC000-0xDDFF. */
@@ -158,6 +186,19 @@ export class Mmu implements Stateful {
         return interrupts.enable;
     }
     if (addr >= 0xff10 && addr < 0xff40) return apu.read(addr);
+    if (!this.cgb) return 0xff;
+    switch (addr) {
+      case IO.VBK:
+        return 0xfe | this.vramBank;
+      case IO.OPRI:
+        // Priority by OAM index, as the boot ROM sets it for color games; locked since.
+        return 0xfe;
+      case IO.SVBK:
+        return 0xf8 | this.wramBank;
+      case 0xff75:
+        return 0x8f | this.spare[3]!;
+    }
+    if (addr >= 0xff72 && addr < 0xff75) return this.spare[addr - 0xff72]!;
     return 0xff;
   }
 
@@ -217,5 +258,11 @@ export class Mmu implements Stateful {
         return;
     }
     if (addr >= 0xff10 && addr < 0xff40) apu.write(addr, value);
+    if (!this.cgb) return;
+    if (addr === IO.VBK) this.vramBank = value & 1;
+    // Bank 0 is always at 0xC000; asking for it at 0xD000 gives bank 1.
+    else if (addr === IO.SVBK) this.wramBank = value & 7 || 1;
+    else if (addr === 0xff75) this.spare[3] = value & 0x70;
+    else if (addr >= 0xff72 && addr < 0xff75) this.spare[addr - 0xff72] = value;
   }
 }

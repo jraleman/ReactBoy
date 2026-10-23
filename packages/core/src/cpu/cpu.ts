@@ -1,4 +1,5 @@
 import type { Interrupts } from '../interrupts';
+import type { Model } from '../model';
 import type { StateReader, StateWriter, Stateful } from '../state';
 import { CB_OPCODES } from './cb-opcodes';
 import { OPCODES } from './opcodes';
@@ -41,12 +42,22 @@ export class Cpu implements Stateful {
     private readonly interrupts: Interrupts,
   ) {}
 
-  /** Registers as the DMG boot ROM leaves them at 0x0100. */
-  reset(headerChecksum: number): void {
-    this.af = headerChecksum === 0 ? 0x0180 : 0x01b0;
-    this.bc = 0x0013;
-    this.de = 0x00d8;
-    this.hl = 0x014d;
+  /**
+   * Registers as the boot ROM leaves them at 0x0100. A = 0x11 is how games tell they are on
+   * a Game Boy Color.
+   */
+  reset(model: Model, headerChecksum: number): void {
+    if (model === 'cgb') {
+      this.af = 0x1180;
+      this.bc = 0x0000;
+      this.de = 0xff56;
+      this.hl = 0x000d;
+    } else {
+      this.af = headerChecksum === 0 ? 0x0180 : 0x01b0;
+      this.bc = 0x0013;
+      this.de = 0x00d8;
+      this.hl = 0x014d;
+    }
     this.sp = 0xfffe;
     this.pc = 0x0100;
     this.ime = this.imeScheduled = this.halted = this.stopped = this.locked = this.haltBug = false;

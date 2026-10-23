@@ -67,6 +67,11 @@ export class StateWriter {
 
 /** Reads fields in the order {@link StateWriter} wrote them; throws on truncated data. */
 export class StateReader {
+  /**
+   * Layout version of the state being read, once its header has been: parts use it to read
+   * states saved before their layout last changed.
+   */
+  version = 0;
   private readonly view: DataView;
   private pos = 0;
 
