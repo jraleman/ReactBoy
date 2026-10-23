@@ -1,7 +1,7 @@
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from '../constants';
 import { Interrupt, type Interrupts } from '../interrupts';
 import type { StateReader, StateWriter, Stateful } from '../state';
-import { PALETTES, toAbgr, type Palette } from './palette';
+import { cgbColorTable, PALETTES, toAbgr, type ColorCorrection, type Palette } from './palette';
 
 export const PpuMode = {
   HBlank: 0,
@@ -41,17 +41,31 @@ const HBLANK_IRQ_LEAD = 1;
 const WINDOW_PENALTY = 6;
 const LINES_PER_FRAME = 154;
 const MAX_SPRITES_PER_LINE = 10;
+/** The 15-bit color white, and the mask of a color's bits. */
+const WHITE = 0x7fff;
+
+/** The bytes of a typed array, for saving it. */
+const bytesOf = (array: Uint16Array) =>
+  new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
 
 /**
  * Pixel processing unit, rendering one scanline at a time when mode 3 begins. Mode timing,
  * LY/LYC and STAT interrupts are dot-accurate to the M-cycle, including how scrolling,
  * sprites and the window lengthen mode 3; mid-scanline register writes are not reflected
- * (that needs a pixel FIFO).
+ * (that needs a pixel FIFO). A Game Boy Color's PPU adds palette RAM, tile attributes in
+ * VRAM bank 1 and its own sprite priority rules.
  */
 export class Ppu implements Stateful {
   /** VRAM: two 8 KiB banks, of which a DMG has only the first. */
   readonly vram = new Uint8Array(0x4000);
   readonly oam = new Uint8Array(0xa0);
+  /**
+   * Game Boy Color palette RAM: 8 palettes of four little-endian 15-bit colors each, for
+   * the background and for sprites. Both start white, as the boot ROM leaves the background
+   * ones; sprite palettes power up with arbitrary contents.
+   */
+  readonly bgPalettes = new Uint8Array(64).fill(0xff);
+  readonly objPalettes = new Uint8Array(64).fill(0xff);
   /** Last completed frame, RGBA. */
   readonly framebuffer = new Uint8ClampedArray(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
   /** Completed frames since power-on; bumps at the start of VBlank. */
@@ -67,6 +81,9 @@ export class Ppu implements Stateful {
   obp1 = 0xff;
   wy = 0;
   wx = 0;
+  /** BCPS and OCPS: the palette RAM byte BCPD and OCPD reach, and bit 7 to step after writes. */
+  private bcps = 0;
+  private ocps = 0;
   /** STAT bits 3-6: interrupt sources. */
   private statSources = 0;
   /** The mode STAT reports. */
@@ -106,19 +123,65 @@ export class Ppu implements Stateful {
   private readonly backShades = new Uint8Array(SCREEN_WIDTH * SCREEN_HEIGHT);
   private readonly frontShades = new Uint8Array(SCREEN_WIDTH * SCREEN_HEIGHT);
   private readonly colors = new Uint32Array(4);
+  /**
+   * The Game Boy Color's equivalent of the shades: each pixel's 15-bit color, taken from
+   * palette RAM as the line was drawn so that palettes rewritten mid-frame show.
+   */
+  private readonly backColors = new Uint16Array(SCREEN_WIDTH * SCREEN_HEIGHT).fill(WHITE);
+  private readonly frontColors = new Uint16Array(SCREEN_WIDTH * SCREEN_HEIGHT).fill(WHITE);
+  private cgbColors = cgbColorTable('lcd');
+  /** Map attributes only exist on a Game Boy Color; this keeps them at 0 on a DMG. */
+  private readonly attrMask: number;
   private readonly bgIndex = new Uint8Array(SCREEN_WIDTH);
+  private readonly bgAttr = new Uint8Array(SCREEN_WIDTH);
   private readonly objColor = new Uint8Array(SCREEN_WIDTH);
   private readonly objAttr = new Uint8Array(SCREEN_WIDTH);
   private readonly lineSprites: number[] = [];
 
-  constructor(private readonly interrupts: Interrupts) {
+  constructor(
+    private readonly interrupts: Interrupts,
+    private readonly cgb = false,
+  ) {
+    this.attrMask = cgb ? 0xff : 0;
     this.setPalette(PALETTES.classic);
   }
 
-  /** Also recolors the last completed frame. */
+  /** The DMG's four shades. Also recolors the last completed frame; a Game Boy Color ignores it. */
   setPalette(palette: Palette): void {
     palette.forEach((rgb, i) => (this.colors[i] = toAbgr(rgb)));
     this.colorFrame();
+  }
+
+  /** How a Game Boy Color's colors are shown. Also recolors the last completed frame. */
+  setColorCorrection(correction: ColorCorrection): void {
+    this.cgbColors = cgbColorTable(correction);
+    this.colorFrame();
+  }
+
+  /** BCPS (or OCPS for sprites). */
+  readPaletteIndex(obj: boolean): number {
+    return 0x40 | (obj ? this.ocps : this.bcps);
+  }
+
+  writePaletteIndex(obj: boolean, value: number): void {
+    if (obj) this.ocps = value & 0xbf;
+    else this.bcps = value & 0xbf;
+  }
+
+  /** BCPD (or OCPD): palette RAM is out of reach while VRAM is. */
+  readPaletteData(obj: boolean): number {
+    if (!this.vramReadable()) return 0xff;
+    return obj ? this.objPalettes[this.ocps & 0x3f]! : this.bgPalettes[this.bcps & 0x3f]!;
+  }
+
+  /** A blocked write is dropped, but the index still steps. */
+  writePaletteData(obj: boolean, value: number): void {
+    const index = obj ? this.ocps : this.bcps;
+    if (this.vramWritable()) (obj ? this.objPalettes : this.bgPalettes)[index & 0x3f] = value;
+    if ((index & 0x80) === 0) return;
+    const next = 0x80 | ((index + 1) & 0x3f);
+    if (obj) this.ocps = next;
+    else this.bcps = next;
   }
 
   get lcdOn(): boolean {
@@ -262,6 +325,7 @@ export class Ppu implements Stateful {
       this.locks = 0;
       this.oamScanSignal = this.hblankSignal = false;
       this.backShades.fill(0);
+      this.backColors.fill(WHITE);
       this.presentFrame();
     } else if (!wasOn && this.lcdOn) {
       this.dot = 4;
@@ -299,8 +363,13 @@ export class Ppu implements Stateful {
   writeState(w: StateWriter): void {
     w.bytes(this.vram);
     w.bytes(this.oam);
-    w.bytes(this.backShades);
-    w.bytes(this.frontShades);
+    if (this.cgb) {
+      w.bytes(bytesOf(this.backColors));
+      w.bytes(bytesOf(this.frontColors));
+    } else {
+      w.bytes(this.backShades);
+      w.bytes(this.frontShades);
+    }
     w.u8(this.lcdc);
     w.u8(this.scy);
     w.u8(this.scx);
@@ -325,6 +394,12 @@ export class Ppu implements Stateful {
     w.bool(this.windowTriggered);
     w.u8(this.windowLine);
     w.u32(this.frameCount);
+    if (this.cgb) {
+      w.bytes(this.bgPalettes);
+      w.bytes(this.objPalettes);
+      w.u8(this.bcps);
+      w.u8(this.ocps);
+    }
   }
 
   readState(r: StateReader): void {
@@ -336,8 +411,13 @@ export class Ppu implements Stateful {
       r.bytes(this.vram);
     }
     r.bytes(this.oam);
-    r.bytes(this.backShades);
-    r.bytes(this.frontShades);
+    if (this.cgb) {
+      r.bytes(bytesOf(this.backColors));
+      r.bytes(bytesOf(this.frontColors));
+    } else {
+      r.bytes(this.backShades);
+      r.bytes(this.frontShades);
+    }
     this.lcdc = r.u8();
     this.scy = r.u8();
     this.scx = r.u8();
@@ -362,18 +442,31 @@ export class Ppu implements Stateful {
     this.windowTriggered = r.bool();
     this.windowLine = r.u8();
     this.frameCount = r.u32();
+    if (this.cgb) {
+      r.bytes(this.bgPalettes);
+      r.bytes(this.objPalettes);
+      this.bcps = r.u8() & 0xbf;
+      this.ocps = r.u8() & 0xbf;
+    }
     this.colorFrame();
   }
 
   private presentFrame(): void {
-    this.frontShades.set(this.backShades);
+    if (this.cgb) this.frontColors.set(this.backColors);
+    else this.frontShades.set(this.backShades);
     this.colorFrame();
     this.frameCount++;
   }
 
   private colorFrame(): void {
-    const { framePixels, frontShades, colors } = this;
-    for (let i = 0; i < frontShades.length; i++) framePixels[i] = colors[frontShades[i]!]!;
+    const { framePixels } = this;
+    if (this.cgb) {
+      const { frontColors, cgbColors } = this;
+      for (let i = 0; i < frontColors.length; i++) framePixels[i] = cgbColors[frontColors[i]!]!;
+    } else {
+      const { frontShades, colors } = this;
+      for (let i = 0; i < frontShades.length; i++) framePixels[i] = colors[frontShades[i]!]!;
+    }
   }
 
   private renderLine(): void {
@@ -381,8 +474,9 @@ export class Ppu implements Stateful {
     if (!this.windowTriggered && ly === this.wy) this.windowTriggered = true;
     let penalty = this.scx & 7;
 
-    // DMG: LCDC bit 0 off blanks both background and window to color 0.
-    if (lcdc & 0x01) {
+    // On a DMG, LCDC bit 0 off blanks both background and window to color 0. A Game Boy
+    // Color draws them regardless; the bit takes away their priority over sprites instead.
+    if (this.cgb || lcdc & 0x01) {
       const windowVisible = (lcdc & 0x20) !== 0 && this.windowTriggered && this.wx <= 166;
       const windowStart = windowVisible ? this.wx - 7 : SCREEN_WIDTH;
       const bgEnd = Math.max(0, Math.min(SCREEN_WIDTH, windowStart));
@@ -404,9 +498,14 @@ export class Ppu implements Stateful {
     if (lcdc & 0x02) penalty += this.renderSprites();
     this.drawingPenalty = penalty;
 
+    if (this.cgb) this.colorLine(ly * SCREEN_WIDTH);
+    else this.shadeLine(ly * SCREEN_WIDTH);
+  }
+
+  /** DMG: each pixel's shade through BGP, OBP0 or OBP1. */
+  private shadeLine(row: number): void {
+    const { bgIndex, bgp } = this;
     const shades = this.backShades;
-    const row = ly * SCREEN_WIDTH;
-    const bgp = this.bgp;
     for (let x = 0; x < SCREEN_WIDTH; x++) {
       const bg = bgIndex[x]!;
       const obj = this.objColor[x]!;
@@ -423,22 +522,57 @@ export class Ppu implements Stateful {
     }
   }
 
+  /** Game Boy Color: each pixel's color from palette RAM. */
+  private colorLine(row: number): void {
+    const { bgIndex, bgAttr, objColor, objAttr, bgPalettes, objPalettes, backColors } = this;
+    const bgPriority = (this.lcdc & 0x01) !== 0;
+    for (let x = 0; x < SCREEN_WIDTH; x++) {
+      const bg = bgIndex[x]!;
+      const obj = objColor[x]!;
+      let palettes = bgPalettes;
+      let entry = ((bgAttr[x]! & 7) << 3) | (bg << 1);
+      // Bit 7 of either the map attribute or the sprite's puts background colors 1-3 on top.
+      if (obj !== 0 && (bg === 0 || !bgPriority || ((bgAttr[x]! | objAttr[x]!) & 0x80) === 0)) {
+        palettes = objPalettes;
+        entry = ((objAttr[x]! & 7) << 3) | (obj << 1);
+      }
+      backColors[row + x] = (palettes[entry]! | (palettes[entry + 1]! << 8)) & WHITE;
+    }
+  }
+
   /**
-   * Fills bgIndex[from, to) from a 32x32 tile map.
+   * Fills bgIndex and bgAttr [from, to) from a 32x32 tile map. On a Game Boy Color each map
+   * entry has an attribute byte at the same address in bank 1: palette (bits 0-2), tile
+   * bank (3), horizontal and vertical flip (5, 6) and priority over sprites (7).
    * @param y row within the map, in pixels
    * @param xOffset map x of screen x=0
    */
   private fetchTiles(highMap: boolean, y: number, from: number, to: number, xOffset: number): void {
-    const vram = this.vram;
+    const { vram, attrMask, bgIndex, bgAttr } = this;
     const unsignedTiles = (this.lcdc & 0x10) !== 0;
     const rowBase = (highMap ? 0x1c00 : 0x1800) + (y >> 3) * 32;
-    const tileRow = (y & 7) * 2;
+    let column = -1;
+    let attr = 0;
+    let lo = 0;
+    let hi = 0;
     for (let x = from; x < to; x++) {
       const mapX = (x + xOffset) & 0xff;
-      const tile = vram[rowBase + (mapX >> 3)]!;
-      const addr = (unsignedTiles ? tile * 16 : 0x1000 + ((tile << 24) >> 24) * 16) + tileRow;
-      const bit = 7 - (mapX & 7);
-      this.bgIndex[x] = (((vram[addr + 1]! >> bit) & 1) << 1) | ((vram[addr]! >> bit) & 1);
+      if (mapX >> 3 !== column) {
+        column = mapX >> 3;
+        const entry = rowBase + column;
+        const tile = vram[entry]!;
+        attr = vram[0x2000 + entry]! & attrMask;
+        const tileRow = attr & 0x40 ? 7 - (y & 7) : y & 7;
+        const addr =
+          (attr & 0x08 ? 0x2000 : 0) +
+          (unsignedTiles ? tile * 16 : 0x1000 + ((tile << 24) >> 24) * 16) +
+          tileRow * 2;
+        lo = vram[addr]!;
+        hi = vram[addr + 1]!;
+      }
+      const bit = attr & 0x20 ? mapX & 7 : 7 - (mapX & 7);
+      bgIndex[x] = (((hi >> bit) & 1) << 1) | ((lo >> bit) & 1);
+      bgAttr[x] = attr;
     }
   }
 
@@ -452,10 +586,12 @@ export class Ppu implements Stateful {
       const top = oam[i * 4]! - 16;
       if (ly >= top && ly < top + height) sprites.push(i);
     }
-    // DMG priority: smaller X wins, then lower OAM index. That is also the order they are
-    // fetched in. Draw lowest priority first so the winner's opaque pixels end up on top.
+    // Sprites are fetched in X order, then OAM order. That is also DMG priority; a Game Boy
+    // Color goes by OAM index alone. Draw lowest priority first so the winner's opaque
+    // pixels end up on top.
     sprites.sort((a, b) => oam[a * 4 + 1]! - oam[b * 4 + 1]! || a - b);
     const penalty = this.spritePenalty();
+    if (this.cgb) sprites.sort((a, b) => a - b);
     for (let s = sprites.length - 1; s >= 0; s--) {
       const base = sprites[s]! * 4;
       const left = oam[base + 1]! - 8;
@@ -463,7 +599,9 @@ export class Ppu implements Stateful {
       let row = ly - (oam[base]! - 16);
       if (attr & 0x40) row = height - 1 - row;
       const tile = height === 16 ? oam[base + 2]! & 0xfe : oam[base + 2]!;
-      const addr = tile * 16 + row * 2;
+      // On a Game Boy Color, bit 3 picks the tile's VRAM bank and bits 0-2 the palette.
+      const bank = this.cgb && attr & 0x08 ? 0x2000 : 0;
+      const addr = bank + tile * 16 + row * 2;
       const lo = vram[addr]!;
       const hi = vram[addr + 1]!;
       for (let px = 0; px < 8; px++) {

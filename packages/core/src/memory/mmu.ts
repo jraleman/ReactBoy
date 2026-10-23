@@ -190,6 +190,12 @@ export class Mmu implements Stateful {
     switch (addr) {
       case IO.VBK:
         return 0xfe | this.vramBank;
+      case IO.BCPS:
+      case IO.OCPS:
+        return ppu.readPaletteIndex(addr === IO.OCPS);
+      case IO.BCPD:
+      case IO.OCPD:
+        return ppu.readPaletteData(addr === IO.OCPD);
       case IO.OPRI:
         // Priority by OAM index, as the boot ROM sets it for color games; locked since.
         return 0xfe;
@@ -260,6 +266,8 @@ export class Mmu implements Stateful {
     if (addr >= 0xff10 && addr < 0xff40) apu.write(addr, value);
     if (!this.cgb) return;
     if (addr === IO.VBK) this.vramBank = value & 1;
+    else if (addr === IO.BCPS || addr === IO.OCPS) ppu.writePaletteIndex(addr === IO.OCPS, value);
+    else if (addr === IO.BCPD || addr === IO.OCPD) ppu.writePaletteData(addr === IO.OCPD, value);
     // Bank 0 is always at 0xC000; asking for it at 0xD000 gives bank 1.
     else if (addr === IO.SVBK) this.wramBank = value & 7 || 1;
     else if (addr === 0xff75) this.spare[3] = value & 0x70;

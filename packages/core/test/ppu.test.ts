@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { GameBoy, IO } from '../src';
 import { Interrupts } from '../src/interrupts';
 import { Ppu, PpuMode } from '../src/ppu/ppu';
+import { makeRom } from './helpers/rom-builder';
 
 const dots = (ppu: Ppu, n: number) => {
   for (let i = 0; i < n / 4; i++) ppu.tick();
@@ -85,5 +87,87 @@ describe('PPU timing', () => {
     expect([ppu.vramReadable(), ppu.oamReadable()]).toEqual([false, false]);
     dots(ppu, 172);
     expect([ppu.vramReadable(), ppu.oamReadable()]).toEqual([true, true]);
+  });
+});
+
+describe('Game Boy Color graphics', () => {
+  const colorGb = () => new GameBoy(makeRom([0x18, 0xfe]), { model: 'cgb' }); // JR -2
+  /** Sets a color in background palette 0 through BCPS/BCPD. */
+  const setBgColor = (gb: GameBoy, index: number, color: number) => {
+    gb.write(IO.BCPS, 0x80 | (index * 2));
+    gb.write(IO.BCPD, color & 0xff);
+    gb.write(IO.BCPD, color >> 8);
+  };
+  const rgbAt = (gb: GameBoy, x: number, y: number) => {
+    const i = (y * 160 + x) * 4;
+    const fb = gb.framebuffer;
+    return (fb[i]! << 16) | (fb[i + 1]! << 8) | fb[i + 2]!;
+  };
+  const RED = 0x001f;
+  const BLUE = 0x7c00;
+
+  it('steps through palette RAM after writes when BCPS or OCPS bit 7 is set', () => {
+    const gb = colorGb();
+    gb.write(IO.BCPS, 0xbe);
+    expect(gb.read(IO.BCPS)).toBe(0xfe);
+    for (const value of [0x12, 0x34, 0x56]) gb.write(IO.BCPD, value);
+    // The index wraps within the 64 bytes and keeps stepping.
+    expect(gb.read(IO.BCPS)).toBe(0xc1);
+    const bg = gb.ppu.bgPalettes;
+    expect([bg[0x3e], bg[0x3f], bg[0x00]]).toEqual([0x12, 0x34, 0x56]);
+
+    gb.write(IO.OCPS, 0x05);
+    gb.write(IO.OCPD, 0xaa);
+    gb.write(IO.OCPD, 0xbb);
+    expect(gb.read(IO.OCPS)).toBe(0x45);
+    expect([gb.read(IO.OCPD), gb.read(IO.OCPD)]).toEqual([0xbb, 0xbb]);
+    expect(gb.ppu.objPalettes[5]).toBe(0xbb);
+  });
+
+  it('locks palette RAM during mode 3, but a blocked write still steps the index', () => {
+    const gb = colorGb();
+    while (gb.ppu.mode !== PpuMode.Drawing) gb.tick();
+    gb.write(IO.BCPS, 0x80);
+    gb.write(IO.BCPD, 0x00);
+    expect(gb.read(IO.BCPS)).toBe(0xc1);
+    expect(gb.read(IO.BCPD)).toBe(0xff);
+    expect(gb.ppu.bgPalettes[0]).toBe(0xff);
+  });
+
+  it('draws palettes rewritten mid-frame', () => {
+    const gb = colorGb();
+    gb.setColorCorrection('raw');
+    gb.runFrame();
+    setBgColor(gb, 0, RED);
+    while (gb.ppu.ly !== 72 || gb.ppu.mode !== PpuMode.HBlank) gb.step();
+    setBgColor(gb, 0, BLUE);
+    gb.runFrame();
+    expect([rgbAt(gb, 0, 0), rgbAt(gb, 159, 71)]).toEqual([0xff0000, 0xff0000]);
+    expect([rgbAt(gb, 0, 72), rgbAt(gb, 159, 143)]).toEqual([0x0000ff, 0x0000ff]);
+  });
+
+  it('shows colors as the handheld LCD did unless asked for raw ones', () => {
+    const gb = colorGb();
+    setBgColor(gb, 0, RED);
+    gb.runFrame();
+    gb.runFrame();
+    expect(rgbAt(gb, 0, 0)).toBe(0xcf0030);
+    gb.setColorCorrection('raw');
+    expect(rgbAt(gb, 0, 0)).toBe(0xff0000);
+    setBgColor(gb, 0, 0x7fff);
+    gb.runFrame();
+    expect(rgbAt(gb, 0, 0)).toBe(0xffffff);
+    gb.setColorCorrection('lcd');
+    expect(rgbAt(gb, 0, 0)).toBe(0xffffff);
+  });
+
+  it('goes white when the LCD is switched off', () => {
+    const gb = colorGb();
+    setBgColor(gb, 0, 0);
+    gb.runFrame();
+    gb.runFrame();
+    expect(rgbAt(gb, 80, 72)).toBe(0x000000);
+    gb.write(IO.LCDC, 0x00);
+    expect(rgbAt(gb, 80, 72)).toBe(0xffffff);
   });
 });

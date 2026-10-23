@@ -6,6 +6,7 @@ import { makeRom } from '../helpers/rom-builder';
 // A busy loop keeps the CPU running every cycle (no HALT), the worst case for the core.
 const busyLoop = makeRom([0x3c, 0x80, 0xa8, 0xcb, 0x37, 0x18, 0xf9]);
 const acid2 = romPath('dmg-acid2/dmg-acid2.gb');
+const cgbAcid2 = romPath('cgb-acid2/cgb-acid2.gbc');
 
 /** Budget from the design doc: under ~8 ms per frame on desktop. */
 const BUDGET_MS = 8;
@@ -33,3 +34,6 @@ it.skipIf(!acid2)('dmg-acid2 with 48 kHz audio', () => {
   gb.apu.setSampleRate(48_000);
   measure('dmg-acid2 with 48 kHz audio', gb);
 });
+it.skipIf(!cgbAcid2)('cgb-acid2', () =>
+  measure('cgb-acid2', new GameBoy(loadRom(cgbAcid2!), { model: 'cgb' })),
+);

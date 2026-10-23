@@ -11,7 +11,13 @@ export {
   type CartridgeHeader,
   type MapperKind,
 } from './cartridge';
-export { PALETTES, toAbgr, type Palette, type PaletteName } from './ppu/palette';
+export {
+  PALETTES,
+  toAbgr,
+  type ColorCorrection,
+  type Palette,
+  type PaletteName,
+} from './ppu/palette';
 export { PpuMode } from './ppu/ppu';
 export {
   Debugger,

@@ -23,6 +23,14 @@ export const IO = {
   /** Game Boy Color: the VRAM bank the CPU sees at 0x8000-0x9FFF. */
   VBK: 0xff4f,
   BOOT: 0xff50,
+  /** Game Boy Color: background palette RAM index (BGPI in some docs). */
+  BCPS: 0xff68,
+  /** Game Boy Color: background palette RAM data at the BCPS index. */
+  BCPD: 0xff69,
+  /** Game Boy Color: sprite palette RAM index. */
+  OCPS: 0xff6a,
+  /** Game Boy Color: sprite palette RAM data at the OCPS index. */
+  OCPD: 0xff6b,
   /** Game Boy Color: sprite priority by OAM index (0) or X position (1), set by the boot ROM. */
   OPRI: 0xff6c,
   /** Game Boy Color: the WRAM bank at 0xD000-0xDFFF. */

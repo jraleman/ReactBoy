@@ -80,7 +80,8 @@ describe('Game Boy Color banking', () => {
     const gb = new GameBoy(makeRom(spin));
     gb.write(0x8000, 0x11);
     gb.write(0xd000, 0x33);
-    for (const addr of [IO.VBK, IO.SVBK, IO.OPRI, 0xff72, 0xff73, 0xff74, 0xff75]) {
+    const registers = [IO.VBK, IO.BCPS, IO.BCPD, IO.OCPS, IO.OCPD, IO.OPRI, IO.SVBK];
+    for (const addr of [...registers, 0xff72, 0xff73, 0xff74, 0xff75]) {
       gb.write(addr, 0x01);
       expect(gb.read(addr)).toBe(0xff);
     }
@@ -104,8 +105,12 @@ const busy = makeRom([
 ]);
 
 describe('save states across models', () => {
-  it('round-trips the banks and registers of a Game Boy Color', () => {
+  it('round-trips the banks, registers and palettes of a Game Boy Color', () => {
     const a = new GameBoy(busy, { model: 'cgb' });
+    a.write(IO.BCPS, 0x80);
+    a.write(IO.BCPD, 0x1f);
+    a.write(IO.OCPS, 0x07);
+    a.write(IO.OCPD, 0x42);
     a.write(IO.VBK, 1);
     a.write(0x8123, 0x77);
     a.write(IO.SVBK, 5);
@@ -116,6 +121,10 @@ describe('save states across models', () => {
     b.deserialize(a.serialize(T0), T0);
     expect([b.read(IO.VBK), b.read(IO.SVBK), b.read(0xff73)]).toEqual([0xff, 0xfd, 0x99]);
     expect([b.peek(0x8123), b.read(0xd456)]).toEqual([0x77, 0x88]);
+    expect([b.read(IO.BCPS), b.ppu.bgPalettes[0], b.read(IO.OCPS), b.ppu.objPalettes[7]]).toEqual([
+      0xc1, 0x1f, 0x47, 0x42,
+    ]);
+    expect(b.framebuffer).toEqual(a.framebuffer);
     expect(b.serialize(T0)).toEqual(a.serialize(T0));
   });
 

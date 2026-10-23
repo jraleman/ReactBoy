@@ -71,19 +71,22 @@ export function runMemoryRom(rom: Uint8Array, maxFrames: number): { status: numb
 }
 
 /**
- * Decodes a non-interlaced greyscale PNG (any bit depth up to 8) into one value per pixel,
- * scaled to 0-255. Enough for the test-ROM reference images without a PNG dependency.
+ * Decodes a non-interlaced greyscale or palette PNG (any bit depth up to 8) into one
+ * 0xRRGGBB value per pixel. Enough for the test-ROM reference images without a PNG
+ * dependency.
  */
-export function decodeGreyscalePng(file: Uint8Array): {
+export function decodePng(file: Uint8Array): {
   width: number;
   height: number;
-  pixels: Uint8Array;
+  pixels: Uint32Array;
 } {
   const view = new DataView(file.buffer, file.byteOffset, file.byteLength);
   let offset = 8;
   let width = 0;
   let height = 0;
   let depth = 0;
+  let indexed = false;
+  let palette: Uint8Array = new Uint8Array(0);
   const idat: Uint8Array[] = [];
   while (offset < file.length) {
     const length = view.getUint32(offset);
@@ -93,8 +96,11 @@ export function decodeGreyscalePng(file: Uint8Array): {
       width = view.getUint32(offset + 8);
       height = view.getUint32(offset + 12);
       depth = data[8]!;
-      if (data[9] !== 0 || data[12] !== 0)
-        throw new Error('Only non-interlaced greyscale PNGs are supported');
+      indexed = data[9] === 3;
+      if ((data[9] !== 0 && !indexed) || data[12] !== 0)
+        throw new Error('Only non-interlaced greyscale and palette PNGs are supported');
+    } else if (type === 'PLTE') {
+      palette = data;
     } else if (type === 'IDAT') {
       idat.push(data);
     }
@@ -126,13 +132,18 @@ export function decodeGreyscalePng(file: Uint8Array): {
     }
   }
   const max = (1 << depth) - 1;
-  const pixels = new Uint8Array(width * height);
+  const pixels = new Uint32Array(width * height);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const bit = x * depth;
       const byte = rows[y * stride + (bit >> 3)]!;
       const value = (byte >> (8 - depth - (bit & 7))) & max;
-      pixels[y * width + x] = Math.round((value * 255) / max);
+      if (indexed) {
+        const [r, g, b] = palette.subarray(value * 3, value * 3 + 3);
+        pixels[y * width + x] = (r! << 16) | (g! << 8) | b!;
+      } else {
+        pixels[y * width + x] = Math.round((value * 255) / max) * 0x010101;
+      }
     }
   }
   return { width, height, pixels };

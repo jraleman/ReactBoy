@@ -14,7 +14,7 @@ import { Interrupts } from './interrupts';
 import { Joypad, type ButtonId } from './joypad';
 import { Mmu } from './memory/mmu';
 import type { Model } from './model';
-import type { Palette } from './ppu/palette';
+import type { ColorCorrection, Palette } from './ppu/palette';
 import { Ppu } from './ppu/ppu';
 import { Serial } from './serial';
 import { SaveStateError, StateReader, StateWriter, type Stateful } from './state';
@@ -31,10 +31,13 @@ export const STATE_VERSION = 3;
 const OLDEST_STATE_VERSION = 2;
 
 export interface GameBoyOptions {
+  /** The DMG's four shades; a Game Boy Color ignores it. */
   palette?: Palette;
+  /** How a Game Boy Color's colors are shown; 'lcd' unless given. */
+  colorCorrection?: ColorCorrection;
   /**
    * The console to be; 'dmg' unless given. Color-only games need 'cgb'. Its banked memory
-   * and registers are emulated, but not yet its color graphics.
+   * and color graphics are emulated, but not yet HDMA or double speed.
    */
   model?: Model;
 }
@@ -82,8 +85,9 @@ export class GameBoy implements Bus {
     this.header = cartridge.header;
     this.mbc = cartridge.mbc;
     this.interrupts = new Interrupts();
-    this.ppu = new Ppu(this.interrupts);
+    this.ppu = new Ppu(this.interrupts, this.model === 'cgb');
     if (options.palette) this.ppu.setPalette(options.palette);
+    if (options.colorCorrection) this.ppu.setColorCorrection(options.colorCorrection);
     this.apu = new Apu();
     this.timer = new Timer(this.interrupts, () => this.apu.clockFrameSequencer());
     this.joypad = new Joypad(this.interrupts);
@@ -188,6 +192,10 @@ export class GameBoy implements Bus {
 
   setPalette(palette: Palette): void {
     this.ppu.setPalette(palette);
+  }
+
+  setColorCorrection(correction: ColorCorrection): void {
+    this.ppu.setColorCorrection(correction);
   }
 
   // --- Saves ----------------------------------------------------------------------------

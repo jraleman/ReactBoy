@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { decodeGreyscalePng } from '../../../packages/core/test/helpers/roms';
+import { decodePng } from '../../../packages/core/test/helpers/roms';
 import {
   expectScreenColor,
   INPUT_ROM,
@@ -30,11 +30,11 @@ test('renders dmg-acid2 exactly like the reference image', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'DMG-ACID2' })).toBeVisible();
 
   // The test draws its final image within a few frames and then holds it.
-  const expected = Array.from(decodeGreyscalePng(readTestFile(reference!)).pixels);
+  const expected = Array.from(decodePng(readTestFile(reference!)).pixels);
   await expect
     .poll(async () => {
       const pixels = await screenPixels(page);
-      return expected.filter((value, i) => pixels[i * 4] !== value).length;
+      return expected.filter((rgb, i) => pixels[i * 4] !== (rgb & 0xff)).length;
     })
     .toBe(0);
 });
