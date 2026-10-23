@@ -70,6 +70,8 @@ export class Ppu implements Stateful {
   readonly framebuffer = new Uint8ClampedArray(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
   /** Completed frames since power-on; bumps at the start of VBlank. */
   frameCount = 0;
+  /** Called as mode 0 starts on each visible line; HBlank DMA copies then. */
+  onHblank: (() => void) | null = null;
 
   lcdc = 0x91;
   scy = 0;
@@ -274,6 +276,7 @@ export class Ppu implements Stateful {
       if (dot >= end) {
         this.locks = 0;
         this.setMode(PpuMode.HBlank);
+        if (this.onHblank !== null) this.onHblank();
       }
     }
   }

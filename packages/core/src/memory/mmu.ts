@@ -1,6 +1,7 @@
 import type { Apu } from '../apu/apu';
 import type { Mbc } from '../cartridge';
 import type { OamDma } from '../dma';
+import type { Hdma } from '../hdma';
 import type { Interrupts } from '../interrupts';
 import type { Joypad } from '../joypad';
 import type { Ppu } from '../ppu/ppu';
@@ -40,15 +41,17 @@ export class Mmu implements Stateful {
    */
   private readonly spare = new Uint8Array(4);
   private dma!: OamDma;
+  private hdma!: Hdma;
 
   constructor(
     private readonly devices: Omit<MmuDevices, 'dma'>,
     private readonly cgb = false,
   ) {}
 
-  /** The DMA unit reads through the MMU, so it is attached after construction. */
-  attachDma(dma: OamDma): void {
+  /** The DMA units read through the MMU, so they are attached after construction. */
+  attachDma(dma: OamDma, hdma: Hdma): void {
     this.dma = dma;
+    this.hdma = hdma;
   }
 
   read(addr: number): number {
@@ -188,6 +191,8 @@ export class Mmu implements Stateful {
     if (addr >= 0xff10 && addr < 0xff40) return apu.read(addr);
     if (!this.cgb) return 0xff;
     switch (addr) {
+      case IO.HDMA5:
+        return this.hdma.readControl();
       case IO.VBK:
         return 0xfe | this.vramBank;
       case IO.BCPS:
@@ -266,6 +271,8 @@ export class Mmu implements Stateful {
     if (addr >= 0xff10 && addr < 0xff40) apu.write(addr, value);
     if (!this.cgb) return;
     if (addr === IO.VBK) this.vramBank = value & 1;
+    else if (addr >= IO.HDMA1 && addr < IO.HDMA5) this.hdma.writeAddress(addr - IO.HDMA1, value);
+    else if (addr === IO.HDMA5) this.hdma.writeControl(value);
     else if (addr === IO.BCPS || addr === IO.OCPS) ppu.writePaletteIndex(addr === IO.OCPS, value);
     else if (addr === IO.BCPD || addr === IO.OCPD) ppu.writePaletteData(addr === IO.OCPD, value);
     // Bank 0 is always at 0xC000; asking for it at 0xD000 gives bank 1.

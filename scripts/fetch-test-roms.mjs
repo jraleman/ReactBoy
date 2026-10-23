@@ -11,6 +11,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'roms', 'test')
 const BLARGG = 'https://raw.githubusercontent.com/retrio/gb-test-roms/master';
 const ACID2 = 'https://github.com/mattcurrie/dmg-acid2';
 const CGB_ACID2 = 'https://github.com/mattcurrie/cgb-acid2';
+const MAGEN = 'https://github.com/alloncm/MagenTests/releases/download/0.5.0';
 const MOONEYE_BUILD = 'mts-20260714-0944-31510e1';
 const MOONEYE = `https://gekkio.fi/files/mooneye-test-suite/${MOONEYE_BUILD}/${MOONEYE_BUILD}.tar.gz`;
 
@@ -53,6 +54,7 @@ const files = [
   { url: `${ACID2}/raw/master/img/reference-dmg.png`, dest: 'dmg-acid2/reference-dmg.png' },
   { url: `${CGB_ACID2}/releases/download/v1.1/cgb-acid2.gbc`, dest: 'cgb-acid2/cgb-acid2.gbc' },
   { url: `${CGB_ACID2}/raw/master/img/reference.png`, dest: 'cgb-acid2/reference.png' },
+  { url: `${MAGEN}/hblank_vram_dma.gbc`, dest: 'magen/hblank_vram_dma.gbc' },
 ];
 
 const exists = (path) =>

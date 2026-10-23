@@ -10,12 +10,13 @@ import { RTC_FOOTER_SIZE } from './cartridge/rtc';
 import { CYCLES_PER_FRAME } from './constants';
 import { Cpu, type Bus } from './cpu/cpu';
 import { OamDma } from './dma';
+import { Hdma } from './hdma';
 import { Interrupts } from './interrupts';
 import { Joypad, type ButtonId } from './joypad';
 import { Mmu } from './memory/mmu';
 import type { Model } from './model';
 import type { ColorCorrection, Palette } from './ppu/palette';
-import { Ppu } from './ppu/ppu';
+import { Ppu, PpuMode } from './ppu/ppu';
 import { Serial } from './serial';
 import { SaveStateError, StateReader, StateWriter, type Stateful } from './state';
 import { Timer } from './timer';
@@ -36,8 +37,8 @@ export interface GameBoyOptions {
   /** How a Game Boy Color's colors are shown; 'lcd' unless given. */
   colorCorrection?: ColorCorrection;
   /**
-   * The console to be; 'dmg' unless given. Color-only games need 'cgb'. Its banked memory
-   * and color graphics are emulated, but not yet HDMA or double speed.
+   * The console to be; 'dmg' unless given. Color-only games need 'cgb'. Its banked memory,
+   * color graphics and VRAM DMA are emulated, but not yet double speed.
    */
   model?: Model;
 }
@@ -58,6 +59,8 @@ export class GameBoy implements Bus {
   readonly serial: Serial;
   readonly interrupts: Interrupts;
   readonly dma: OamDma;
+  /** Game Boy Color VRAM DMA; idle on a DMG, which has no registers to start it. */
+  readonly hdma: Hdma;
   readonly mbc: Mbc;
   /** Total T-cycles since power-on. */
   cycles = 0;
@@ -69,6 +72,8 @@ export class GameBoy implements Bus {
   private readonly reads = new Float64Array(8);
   private readonly writes = new Float64Array(8);
   private idleCycles = 0;
+  /** Set while {@link runHdma} ticks the machine, so its ticks don't start more copies. */
+  private inHdma = false;
   /** {@link cycles} when activity was last taken. */
   private activitySince = 0;
   /** Everything a save state covers, in the order it is written. */
@@ -105,7 +110,22 @@ export class GameBoy implements Bus {
       this.model === 'cgb',
     );
     this.dma = new OamDma((addr) => this.mmu.read(addr), this.ppu.oam);
-    this.mmu.attachDma(this.dma);
+    this.hdma = new Hdma(
+      (addr) => {
+        this.reads[addr >>> 13]!++;
+        return this.mmu.read(addr);
+      },
+      (addr, value) => {
+        this.writes[addr >>> 13]!++;
+        this.mmu.write(addr, value);
+      },
+      () => (this.ppu.readStat() & 3) === PpuMode.HBlank,
+    );
+    // HBlank DMA pauses while the CPU is halted.
+    this.ppu.onHblank = () => {
+      if (!this.cpu.halted && !this.cpu.stopped) this.hdma.hblankStarted();
+    };
+    this.mmu.attachDma(this.dma, this.hdma);
     this.cpu = new Cpu(this, this.interrupts);
     this.cpu.reset(this.model, this.header.headerChecksum);
     this.romChecksum = ((rom[0x14e] ?? 0) << 8) | (rom[0x14f] ?? 0);
@@ -116,6 +136,7 @@ export class GameBoy implements Bus {
       this.joypad,
       this.serial,
       this.dma,
+      ...(this.model === 'cgb' ? [this.hdma] : []),
       this.mmu,
       this.ppu,
       this.apu,
@@ -300,6 +321,7 @@ export class GameBoy implements Bus {
   }
 
   tick(): void {
+    if (this.hdma.pending > 0 && !this.inHdma) this.runHdma();
     this.cycles += 4;
     const { cpu } = this;
     if (cpu.halted || cpu.stopped || cpu.locked) this.idleCycles += 4;
@@ -308,6 +330,16 @@ export class GameBoy implements Bus {
     this.ppu.tick();
     this.dma.tick();
     this.serial.tick();
+  }
+
+  /** Copies VRAM DMA blocks while the CPU waits, 8 M-cycles for each 16 bytes. */
+  private runHdma(): void {
+    this.inHdma = true;
+    while (this.hdma.pending > 0) {
+      this.hdma.copyBlock();
+      for (let i = 0; i < 8; i++) this.tick();
+    }
+    this.inHdma = false;
   }
 
   stop(): void {
