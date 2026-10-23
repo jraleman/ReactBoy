@@ -11,6 +11,7 @@ import { usePartsView } from './components/shell/partsView';
 import { UpdateBanner } from './components/update/UpdateBanner';
 import { useDeviceScale, WIDE_QUERY } from './hooks/useDeviceScale';
 import { useEmulatorClient, useEmulatorState } from './hooks/useEmulator';
+import { useIntro } from './hooks/useIntro';
 import { useKeyboard } from './hooks/useKeyboard';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { useSettings } from './hooks/useSettings';
@@ -34,6 +35,7 @@ export function App() {
   const [debuggerToggled, setDebuggerToggled] = useState(false);
   const palette = PALETTES[settings.palette] ?? PALETTES.classic;
   const view = usePartsView();
+  const intro = useIntro();
 
   useKeyboard(client, settings.keymap);
   useShortcuts(client);
@@ -98,11 +100,12 @@ export function App() {
           contrast={settings.contrast}
           onContrast={(contrast) => updateSettings({ contrast })}
           view={view}
-          screen={<Screen palette={palette} />}
+          screen={<Screen palette={palette} intro={intro} />}
           dpad={<DPad onButton={onTouch} pressed={pressed} />}
           actions={<ActionButtons onButton={onTouch} pressed={pressed} />}
           menu={<StartSelect onButton={onTouch} pressed={pressed} />}
           cardSlot={wide ? cardSlot : null}
+          intro={intro}
         />
       </div>
       <div className={styles.side} data-debugger={settings.debugger || undefined}>

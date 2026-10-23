@@ -19,14 +19,18 @@
   flex: none;
   width: calc(var(--u) * 256);
   height: calc(var(--u) * 410);
-  border-radius: calc(var(--u) * 9) calc(var(--u) * 9) calc(var(--u) * 52) calc(var(--u) * 9);
-  background:
+  /* The solid case's plastic, kept apart from the shadow it casts so .casing can share it. */
+  --skin:
     linear-gradient(105deg, rgb(255 255 255 / 0.18), transparent 35%),
     linear-gradient(var(--shell-light), var(--shell) 8%, var(--shell) 92%, var(--shell-shade));
-  box-shadow:
+  --skin-edge:
     inset calc(var(--u) * -2) calc(var(--u) * -3) 0 rgb(0 0 0 / 0.12),
-    inset calc(var(--u) * 1) calc(var(--u) * 1) 0 rgb(255 255 255 / 0.35),
-    0 calc(var(--u) * 14) calc(var(--u) * 28) rgb(20 16 40 / 0.28);
+    inset calc(var(--u) * 1) calc(var(--u) * 1) 0 rgb(255 255 255 / 0.35);
+  --drop: 0 calc(var(--u) * 14) calc(var(--u) * 28) rgb(20 16 40 / 0.28);
+
+  border-radius: calc(var(--u) * 9) calc(var(--u) * 9) calc(var(--u) * 52) calc(var(--u) * 9);
+  background: var(--skin);
+  box-shadow: var(--skin-edge), var(--drop);
   font-family: var(--font-display);
   user-select: none;
   touch-action: none;
@@ -41,7 +45,7 @@
   --shell-shade: rgb(0 0 0 / 0.38);
 
   background: none;
-  box-shadow: 0 calc(var(--u) * 14) calc(var(--u) * 28) rgb(20 16 40 / 0.28);
+  box-shadow: var(--drop);
 }
 
 .shell[data-theme='purple'] {
@@ -615,6 +619,160 @@
   .signals path,
   .scan {
     animation: none;
+  }
+}
+
+/*
+ * --- Coming together on load (data-intro, ~3 s) ---
+ * The CPU grows and gets its pins, the other chips pop in and the copper is drawn, then the
+ * case closes over the board, the bezel and buttons drop in and the screen boots (see
+ * Screen.module.css, which starts at 1750ms). useIntro ends it, so its timer matches this.
+ */
+
+/* A solid case is drawn over the board while it comes together, then the board goes. */
+.shell[data-intro] {
+  background: none;
+  box-shadow: var(--drop);
+}
+
+.casing {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--skin);
+  box-shadow: var(--skin-edge);
+  pointer-events: none;
+}
+
+.shell[data-intro] .board {
+  animation: fade-in 300ms ease-out both;
+}
+
+.shell[data-intro] :is(.cpu, .mount) {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.shell[data-intro] .cpu {
+  animation: chip-grow 350ms cubic-bezier(0.3, 1.3, 0.5, 1) 150ms both;
+}
+
+/* Pins run out along the top and bottom, then down the sides, as in the original sketch. */
+.shell[data-intro] .pin[data-side] {
+  transform-box: fill-box;
+  transform-origin: left top;
+  animation: pins-across 220ms ease-out 400ms both;
+}
+
+.shell[data-intro] .pin:is([data-side='left'], [data-side='right']) {
+  animation-name: pins-down;
+  animation-delay: 550ms;
+}
+
+.shell[data-intro] .mount {
+  animation: chip-pop 260ms cubic-bezier(0.3, 1.4, 0.5, 1) both;
+  animation-delay: calc(650ms + var(--order) * 70ms);
+}
+
+.shell[data-intro] :is(.traces, .powerTraces) path {
+  stroke-dasharray: 1;
+  animation: trace-draw 450ms ease-in-out 750ms both;
+}
+
+.shell[data-intro] :is(.casing, .plastic) {
+  animation: case-close 400ms cubic-bezier(0.2, 0.8, 0.2, 1) 1150ms both;
+}
+
+.shell[data-intro] :is(.seam, .switchLabel, .powerSwitch, .contrast, .wordmark, .speaker) {
+  animation: fade-in 250ms ease-out 1350ms both;
+}
+
+.shell[data-intro] :is(.bezel, .dpad, .actions, .menu) {
+  animation: drop-in 300ms cubic-bezier(0.3, 1.2, 0.5, 1) 1350ms both;
+}
+
+.shell[data-intro] .dpad {
+  animation-delay: 1500ms;
+}
+
+.shell[data-intro] .actions {
+  animation-delay: 1570ms;
+}
+
+.shell[data-intro] .menu {
+  animation-delay: 1640ms;
+}
+
+/* Power reaches the LED as the screen comes on. */
+.shell[data-intro] .led {
+  animation: led-flash 600ms ease-out 1750ms;
+}
+
+/* The parts hint they can be opened once the device is together, not while it moves. */
+.shell[data-intro] .hotspot {
+  animation: none;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes chip-grow {
+  from {
+    transform: scale(0);
+  }
+}
+
+@keyframes chip-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+@keyframes pins-across {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes pins-down {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes trace-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The front half lowered onto the board, from just above it. */
+@keyframes case-close {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--u) * -10)) scale(1.06);
+  }
+}
+
+/* Pressed in from the viewer's side. */
+@keyframes drop-in {
+  from {
+    opacity: 0;
+    transform: scale(1.25);
+  }
+}
+
+@keyframes led-flash {
+  30% {
+    background: #ff3b48;
+    box-shadow: 0 0 calc(var(--u) * 5) #ff3b48;
   }
 }
 

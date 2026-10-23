@@ -25,7 +25,7 @@ test('renders dmg-acid2 exactly like the reference image', async ({ page }) => {
   test.skip(!rom || !reference, 'run pnpm fetch-roms first');
 
   // Greyscale shades match the reference image's values.
-  await page.getByRole('radio', { name: 'Greyscale' }).check({ force: true });
+  await page.getByRole('radio', { name: 'Greyscale' }).check();
   await loadRom(page, rom!);
   await expect(page.getByRole('heading', { name: 'DMG-ACID2' })).toBeVisible();
 

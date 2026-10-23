@@ -98,6 +98,20 @@ const POWER: Bus = {
   paths: ['M54 342 H70 V392 H150 V383', 'M30 343 V330 H92 V300', 'M24 362 V398 H64'],
 };
 
+/** A part that pops into place as the device comes together; `order` staggers them. */
+const mount = (order: number) => ({
+  className: styles.mount,
+  style: { '--order': order } as CSSProperties,
+});
+
+/** The CPU's pins along each side, at `at` along it (see the CPU below). */
+const CPU_PINS = {
+  top: (at: number) => ({ x: at, y: 253, width: 0.9, height: 3.2 }),
+  bottom: (at: number) => ({ x: at, y: 293.8, width: 0.9, height: 3.2 }),
+  left: (at: number) => ({ x: 100, y: at + 153, width: 3.2, height: 0.9 }),
+  right: (at: number) => ({ x: 140.8, y: at + 153, width: 3.2, height: 0.9 }),
+};
+
 /** Opacity that follows a part's activity, set as a custom property by LiveBoard. */
 const lit = (activity: keyof BoardActivity): CSSProperties => ({
   opacity: `var(--${activity}, 0)`,
@@ -222,12 +236,12 @@ export const Board = memo(function Board() {
 
       <g className={styles.traces}>
         {BUSES.flatMap((bus) => bus.paths).map((d) => (
-          <path key={d} d={d} />
+          <path key={d} d={d} pathLength={1} />
         ))}
       </g>
       <g className={styles.powerTraces}>
         {POWER.paths.map((d) => (
-          <path key={d} d={d} />
+          <path key={d} d={d} pathLength={1} />
         ))}
       </g>
       <g className={styles.powerGlow} style={lit('power')}>
@@ -301,8 +315,12 @@ export const Board = memo(function Board() {
         EXT
       </text>
 
-      <Sop x={150} y={209} w={40} h={13} pins={14} label="WRAM" sub="8 KiB" />
-      <Sop x={198} y={209} w={40} h={13} pins={14} label="VRAM" sub="8 KiB" />
+      <g {...mount(0)}>
+        <Sop x={150} y={209} w={40} h={13} pins={14} label="WRAM" sub="8 KiB" />
+      </g>
+      <g {...mount(1)}>
+        <Sop x={198} y={209} w={40} h={13} pins={14} label="VRAM" sub="8 KiB" />
+      </g>
       <text className={styles.silk} x={150} y={206}>
         U2
       </text>
@@ -312,58 +330,62 @@ export const Board = memo(function Board() {
 
       {/* The CPU: an 80-pin flat pack, 20 pins a side. */}
       <g>
-        {row(20, (i) => {
-          const at = 105 + i * 1.75;
-          return (
-            <g key={i} className={styles.pin}>
-              <rect x={at} y={253} width={0.9} height={3.2} />
-              <rect x={at} y={293.8} width={0.9} height={3.2} />
-              <rect x={100} y={at + 153} width={3.2} height={0.9} />
-              <rect x={140.8} y={at + 153} width={3.2} height={0.9} />
-            </g>
-          );
-        })}
-        <rect className={styles.chip} x={103} y={256} width={38} height={38} rx={1.2} />
-        <rect className={styles.chipSheen} x={104.5} y={257.5} width={35} height={35} rx={0.8} />
-        <circle className={styles.pinOne} cx={107} cy={290} r={1.2} />
-        <text className={styles.cpuText} x={122} y={273}>
-          DMG-CPU
-        </text>
-        <text className={styles.chipSub} x={122} y={279}>
-          SM83 · 4.19 MHz
-        </text>
-        <text className={styles.chipSub} x={122} y={286}>
-          REACTBOY
-        </text>
+        {(Object.keys(CPU_PINS) as (keyof typeof CPU_PINS)[]).map((side) => (
+          <g key={side} className={styles.pin} data-side={side}>
+            {row(20, (i) => (
+              <rect key={i} {...CPU_PINS[side](105 + i * 1.75)} />
+            ))}
+          </g>
+        ))}
+        <g className={styles.cpu}>
+          <rect className={styles.chip} x={103} y={256} width={38} height={38} rx={1.2} />
+          <rect className={styles.chipSheen} x={104.5} y={257.5} width={35} height={35} rx={0.8} />
+          <circle className={styles.pinOne} cx={107} cy={290} r={1.2} />
+          <text className={styles.cpuText} x={122} y={273}>
+            DMG-CPU
+          </text>
+          <text className={styles.chipSub} x={122} y={279}>
+            SM83 · 4.19 MHz
+          </text>
+          <text className={styles.chipSub} x={122} y={286}>
+            REACTBOY
+          </text>
+        </g>
       </g>
       <text className={styles.silk} x={98.5} y={250}>
         U1
       </text>
 
       {/* Crystal. */}
-      <rect fill="url(#board-metal)" x={104} y={304} width={22} height={9} rx={4.5} />
-      <text className={styles.crystalText} x={115} y={310.2}>
-        4.194M
-      </text>
+      <g {...mount(2)}>
+        <rect fill="url(#board-metal)" x={104} y={304} width={22} height={9} rx={4.5} />
+        <text className={styles.crystalText} x={115} y={310.2}>
+          4.194M
+        </text>
+      </g>
       <text className={styles.silk} x={128} y={311}>
         X1
       </text>
 
       {/* Power regulator: inductor, controller and filter capacitors. */}
-      <circle className={styles.inductor} cx={25} cy={350} r={8.5} />
-      <circle className={styles.inductorWinding} cx={25} cy={350} r={5.6} />
-      <circle fill="#15151a" cx={25} cy={350} r={2.4} />
-      <Sop x={38} y={337} w={16} h={8} pins={4} label="DC" />
-      <circle className={styles.capacitor} cx={46} cy={364} r={6} />
-      <path className={styles.capacitorVent} d="M42.5 364 H49.5 M46 360.5 V367.5" />
-      <circle className={styles.capacitor} cx={59} cy={366} r={4.4} />
-      <path className={styles.capacitorVent} d="M56.4 366 H61.6 M59 363.4 V368.6" />
+      <g {...mount(3)}>
+        <circle className={styles.inductor} cx={25} cy={350} r={8.5} />
+        <circle className={styles.inductorWinding} cx={25} cy={350} r={5.6} />
+        <circle fill="#15151a" cx={25} cy={350} r={2.4} />
+        <Sop x={38} y={337} w={16} h={8} pins={4} label="DC" />
+        <circle className={styles.capacitor} cx={46} cy={364} r={6} />
+        <path className={styles.capacitorVent} d="M42.5 364 H49.5 M46 360.5 V367.5" />
+        <circle className={styles.capacitor} cx={59} cy={366} r={4.4} />
+        <path className={styles.capacitorVent} d="M56.4 366 H61.6 M59 363.4 V368.6" />
+      </g>
       <text className={styles.silk} x={32} y={378}>
         L1 DC-DC
       </text>
 
       {/* Sound: the amp and the speaker under the grille. */}
-      <Sop x={147} y={372} w={18} h={9} pins={4} label="AMP" />
+      <g {...mount(4)}>
+        <Sop x={147} y={372} w={18} h={9} pins={4} label="AMP" />
+      </g>
       <circle fill="url(#board-cone)" cx={204} cy={357} r={25} />
       <circle className={styles.coneRing} cx={204} cy={357} r={21.5} />
       <circle className={styles.coneRing} cx={204} cy={357} r={13} />

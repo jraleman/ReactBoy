@@ -38,28 +38,6 @@
   background: var(--lcd-0);
 }
 
-/* The one piece of ambient motion: the boot logo scrolling down, as the hardware does. */
-.logo {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: calc(var(--u) * 20);
-  font-weight: 800;
-  font-style: italic;
-  font-stretch: 112%;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  animation: boot-drop 1.6s steps(24, end) both;
-}
-
-.hint {
-  margin: 0;
-  max-width: 28ch;
-  font-size: calc(var(--u) * 7);
-  line-height: 1.35;
-  color: var(--lcd-2);
-  animation: appear 0.01s 1.7s both;
-}
-
 .error {
   margin: 0;
   font-size: calc(var(--u) * 7.5);
@@ -74,24 +52,172 @@
   font-style: italic;
 }
 
-@keyframes boot-drop {
+/*
+ * --- The boot screen, after the Game Boy Color's ---
+ * A white screen, the React atom spinning together, then "ReactBoy" lit by a band of colors
+ * sweeping across. It plays from --boot-at: during the intro (data-intro, on the shell) once
+ * the device is together, and on its own when a game starts (data-power). Otherwise, as
+ * after a skipped intro, it rests on its last frame.
+ */
+.boot {
+  --boot-off: color-mix(in srgb, var(--lcd-0) 70%, #8e9484);
+
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 12);
+  padding: calc(var(--u) * 12);
+  text-align: center;
+  background: #fbfbf6;
+  pointer-events: none;
+}
+
+.bootLogo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 5);
+}
+
+.atom {
+  display: block;
+  width: calc(var(--u) * 40);
+  overflow: visible;
+}
+
+.orbit {
+  fill: none;
+  stroke: #149eca;
+  stroke-width: 1;
+}
+
+.nucleus {
+  fill: #149eca;
+}
+
+/*
+ * The colors ride on a background three times the word's width, clipped to the text:
+ * blue | green | pink | red | yellow | nothing. Sliding it from its right end to its left
+ * sweeps yellow through to blue across the letters, ending all blue.
+ */
+.logo {
+  margin: 0;
+  padding-inline: 0.2em;
+  font-family: var(--font-display);
+  font-size: calc(var(--u) * 22);
+  font-weight: 800;
+  font-style: italic;
+  font-stretch: 112%;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: transparent;
+  background: linear-gradient(
+      90deg,
+      #3232fc 33.4%,
+      #85e367 33.4% 40%,
+      #ff52e8 40% 46.7%,
+      #ff0151 46.7% 53.3%,
+      #f9e52e 53.3% 60%,
+      transparent 60%
+    )
+    0 0 / 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.hint {
+  margin: 0;
+  max-width: 28ch;
+  font-size: calc(var(--u) * 7);
+  line-height: 1.35;
+  color: #5e5e70;
+}
+
+/* 1750ms: as the shell's intro finishes putting the device together. */
+[data-intro] .boot {
+  --boot-at: 1750ms;
+
+  animation: lcd-on 150ms var(--boot-at) both;
+}
+
+.boot[data-power] {
+  --boot-at: 0ms;
+
+  animation:
+    lcd-on 150ms both,
+    boot-out 250ms ease-in 1400ms forwards;
+}
+
+:is([data-intro], [data-power]) .atom {
+  animation: atom-spin 600ms cubic-bezier(0.2, 0.8, 0.2, 1) calc(var(--boot-at) + 100ms) both;
+}
+
+:is([data-intro], [data-power]) .orbit {
+  stroke-dasharray: 1;
+  animation: orbit-draw 350ms ease-out both;
+  animation-delay: calc(var(--boot-at) + 100ms + var(--order) * 75ms);
+}
+
+:is([data-intro], [data-power]) .nucleus {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nucleus-pop 200ms cubic-bezier(0.3, 1.6, 0.5, 1) calc(var(--boot-at) + 500ms) both;
+}
+
+:is([data-intro], [data-power]) .logo {
+  animation: color-sweep 750ms linear calc(var(--boot-at) + 400ms) both;
+}
+
+[data-intro] .hint {
+  animation: fade-in 200ms calc(var(--boot-at) + 1150ms) both;
+}
+
+/* The LCD powering up from the unlit grey. */
+@keyframes lcd-on {
   from {
-    transform: translateY(calc(var(--u) * -90));
-  }
-  to {
-    transform: none;
+    background-color: var(--boot-off);
   }
 }
 
-@keyframes appear {
-  from {
+/* The logo gives way to the game. */
+@keyframes boot-out {
+  to {
     opacity: 0;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .logo,
-  .hint {
-    animation: none;
+@keyframes atom-spin {
+  from {
+    transform: rotate(-150deg) scale(0.6);
+  }
+}
+
+@keyframes orbit-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes nucleus-pop {
+  from {
+    transform: scale(0);
+  }
+}
+
+@keyframes color-sweep {
+  from {
+    background-position: 100% 0;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
   }
 }

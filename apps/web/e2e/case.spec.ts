@@ -38,7 +38,7 @@ test.beforeEach(async ({ page }) => {
 
 test('a clear case explains its parts without covering the screen', async ({ page }) => {
   await loadRom(page, { name: 'input.gb', buffer: INPUT_ROM });
-  await page.getByRole('radio', { name: 'Atomic Purple' }).check({ force: true });
+  await page.getByRole('radio', { name: 'Atomic Purple' }).check();
 
   // Wide: the explainer sits beside the device.
   await page.getByRole('button', { name: 'CPU (DMG-CPU)' }).click();
@@ -67,7 +67,7 @@ test('a clear case explains its parts without covering the screen', async ({ pag
 
 test('the board lights up with the game, and freezes when paused', async ({ page }) => {
   await loadRom(page, { name: 'input.gb', buffer: INPUT_ROM });
-  await page.getByRole('radio', { name: 'Smoke Black' }).check({ force: true });
+  await page.getByRole('radio', { name: 'Smoke Black' }).check();
   const board = page.locator('[data-running]').filter({ has: page.locator('svg') });
   // The ROM polls the joypad from ROM non-stop: the CPU and cartridge bus are busy.
   await expect

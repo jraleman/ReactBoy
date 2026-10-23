@@ -469,6 +469,11 @@ export class EmulatorClient {
     this.audio.unlock();
   }
 
+  /** The boot sound, if sound has been unlocked. */
+  chime(): void {
+    this.audio.chime();
+  }
+
   setAudio(settings: AudioSettings): void {
     this.audioSettings = settings;
     this.audio.setVolume(settings.muted ? 0 : settings.volume);

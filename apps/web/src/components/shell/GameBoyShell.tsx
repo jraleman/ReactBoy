@@ -2,6 +2,7 @@ import { useCallback, useRef, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { Palette } from '@reactboy/core';
 import type { ShellTheme } from '../../hooks/useSettings';
+import { Board } from './Board';
 import styles from './GameBoyShell.module.css';
 import { LiveBoard } from './LiveBoard';
 import { PartCard } from './PartCard';
@@ -34,6 +35,8 @@ interface Props {
    * it the explainer slides over the controls, below the screen.
    */
   cardSlot?: HTMLElement | null;
+  /** The device is coming together on load; see useIntro. */
+  intro?: boolean;
 }
 
 /**
@@ -65,6 +68,7 @@ export function GameBoyShell({
   actions,
   menu,
   cardSlot,
+  intro = false,
 }: Props) {
   const clear = isClear(theme);
   const hotspots = useRef(new Map<PartId, HTMLButtonElement>());
@@ -103,13 +107,21 @@ export function GameBoyShell({
       className={styles.shell}
       data-theme={theme}
       data-clear={clear || undefined}
+      data-intro={intro || undefined}
       style={{ '--u': `${scale}px` } as CSSProperties}
     >
-      {clear && (
+      {clear ? (
         <>
           <LiveBoard />
           <div className={styles.plastic} aria-hidden="true" />
         </>
+      ) : (
+        intro && (
+          <>
+            <Board />
+            <div className={styles.casing} aria-hidden="true" />
+          </>
+        )
       )}
       <div className={styles.seam} aria-hidden="true" />
       <span className={styles.switchLabel} aria-hidden="true">

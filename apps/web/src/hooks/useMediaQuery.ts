@@ -1,5 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
+export const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
 /** Whether `query` matches, following changes (window resizes, rotation). */
 export function useMediaQuery(query: string): boolean {
   const subscribe = useCallback(

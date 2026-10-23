@@ -76,6 +76,30 @@ export class AudioOutput {
     this.post('clear');
   }
 
+  /**
+   * The boot "ding": a short square-wave C6 then a ringing C7, as the hardware plays them.
+   * Silent until sound is unlocked; follows the volume.
+   */
+  chime(): void {
+    const { context, gain } = this;
+    if (!context || !gain || context.state !== 'running') return;
+    const start = context.currentTime;
+    for (const [hz, at, length] of [
+      [1048.6, 0, 0.07],
+      [2097.2, 0.07, 0.9],
+    ] as const) {
+      const tone = context.createOscillator();
+      const envelope = context.createGain();
+      tone.type = 'square';
+      tone.frequency.value = hz;
+      envelope.gain.setValueAtTime(0.12, start + at);
+      envelope.gain.exponentialRampToValueAtTime(0.001, start + at + length);
+      tone.connect(envelope).connect(gain);
+      tone.start(start + at);
+      tone.stop(start + at + length);
+    }
+  }
+
   close(): void {
     void this.context?.close();
   }
