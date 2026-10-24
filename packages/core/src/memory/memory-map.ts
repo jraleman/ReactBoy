@@ -20,6 +20,8 @@ export const IO = {
   OBP1: 0xff49,
   WY: 0xff4a,
   WX: 0xff4b,
+  /** Game Boy Color: CPU speed (bit 7), and a switch armed for the next STOP (bit 0). */
+  KEY1: 0xff4d,
   /** Game Boy Color: the VRAM bank the CPU sees at 0x8000-0x9FFF. */
   VBK: 0xff4f,
   BOOT: 0xff50,

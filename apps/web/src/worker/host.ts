@@ -2,9 +2,12 @@ import {
   Debugger,
   GameBoy,
   PALETTES,
+  parseHeader,
+  preferredModel,
   snapshot,
   type BreakReason,
   type BusActivity,
+  type Model,
   type Palette,
 } from '@reactboy/core';
 import { LinkCable } from './link';
@@ -46,6 +49,35 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
     post({ type: 'battery', key, data: data.buffer as ArrayBuffer }, [data.buffer as ArrayBuffer]);
   };
 
+  const create = (image: Uint8Array, model: Model) => {
+    const next = new GameBoy(image, { palette, model });
+    next.apu.setSampleRate(sampleRate);
+    next.apu.channelMask = channels;
+    return next;
+  };
+
+  /**
+   * Color mode for games that ask for it, unless resuming a state saved on the other model
+   * (such as one from before games ran in color), which carries on as it was.
+   */
+  const modelFor = (image: Uint8Array, state: Uint8Array | null): Model => {
+    if (state) {
+      try {
+        return GameBoy.stateModel(state);
+      } catch {
+        // Not a state this version can load; boot() falls back to the battery save.
+      }
+    }
+    return preferredModel(parseHeader(image));
+  };
+
+  /** Swaps in `next` as the running machine. */
+  const install = (next: GameBoy) => {
+    gb = next;
+    cable.plug(gb.serial);
+    attachDebugger();
+  };
+
   /** Starts `image`; on failure the current game (if any) keeps running untouched. */
   const boot = (
     image: Uint8Array,
@@ -55,14 +87,12 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
   ) => {
     let next: GameBoy;
     try {
-      next = new GameBoy(image, { palette });
+      next = create(image, modelFor(image, state));
     } catch (error) {
       post({ type: 'error', key: imageKey, message: messageOf(error) });
       return;
     }
     flushBattery();
-    next.apu.setSampleRate(sampleRate);
-    next.apu.channelMask = channels;
     if (battery) next.importBattery(battery);
     let resumed = false;
     if (state) {
@@ -73,12 +103,10 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
         // A state from an older version: start from the battery save instead.
       }
     }
-    gb = next;
-    cable.plug(gb.serial);
     rom = image;
     key = imageKey;
-    attachDebugger();
-    post({ type: 'loaded', key, header: gb.header, resumed });
+    install(next);
+    post({ type: 'loaded', key, header: next.header, resumed });
   };
 
   /** (Re)creates the debugger for the current game, or drops it when it is off. */
@@ -212,9 +240,17 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
         reply(message.id, gb.serialize());
         break;
       case 'restore':
-        if (!gb) return reply(message.id, null, 'No game is running.');
+        if (!gb || !rom) return reply(message.id, null, 'No game is running.');
         try {
-          gb.deserialize(new Uint8Array(message.state));
+          const state = new Uint8Array(message.state);
+          const model = GameBoy.stateModel(state);
+          if (model === gb.model) {
+            gb.deserialize(state);
+          } else {
+            const next = create(rom, model);
+            next.deserialize(state);
+            install(next);
+          }
           reply(message.id, null);
         } catch (error) {
           reply(message.id, null, messageOf(error));

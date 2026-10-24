@@ -6,6 +6,7 @@ import type { Interrupts } from '../interrupts';
 import type { Joypad } from '../joypad';
 import type { Ppu } from '../ppu/ppu';
 import type { Serial } from '../serial';
+import type { Speed } from '../speed';
 import type { StateReader, StateWriter, Stateful } from '../state';
 import type { Timer } from '../timer';
 import { IO } from './memory-map';
@@ -18,6 +19,7 @@ export interface MmuDevices {
   joypad: Joypad;
   serial: Serial;
   interrupts: Interrupts;
+  speed: Speed;
   dma: OamDma;
 }
 
@@ -191,6 +193,8 @@ export class Mmu implements Stateful {
     if (addr >= 0xff10 && addr < 0xff40) return apu.read(addr);
     if (!this.cgb) return 0xff;
     switch (addr) {
+      case IO.KEY1:
+        return this.devices.speed.read();
       case IO.HDMA5:
         return this.hdma.readControl();
       case IO.VBK:
@@ -270,7 +274,8 @@ export class Mmu implements Stateful {
     }
     if (addr >= 0xff10 && addr < 0xff40) apu.write(addr, value);
     if (!this.cgb) return;
-    if (addr === IO.VBK) this.vramBank = value & 1;
+    if (addr === IO.KEY1) this.devices.speed.write(value);
+    else if (addr === IO.VBK) this.vramBank = value & 1;
     else if (addr >= IO.HDMA1 && addr < IO.HDMA5) this.hdma.writeAddress(addr - IO.HDMA1, value);
     else if (addr === IO.HDMA5) this.hdma.writeControl(value);
     else if (addr === IO.BCPS || addr === IO.OCPS) ppu.writePaletteIndex(addr === IO.OCPS, value);

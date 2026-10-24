@@ -88,7 +88,7 @@ export function Screen({ palette, intro = false }: { palette: Palette; intro?: b
         <div key={boot} className={styles.boot} data-power={boot !== null || undefined}>
           <BootLogo />
           {status === 'empty' && (
-            <p className={styles.hint}>Drop a .gb file here, or choose Load ROM.</p>
+            <p className={styles.hint}>Drop a .gb or .gbc file here, or choose Load ROM.</p>
           )}
         </div>
       )}

@@ -5,13 +5,14 @@ import { MemoryStore } from '../storage/store';
 import { EmulatorClient } from './client';
 
 /** A valid ROM header around `program` at 0x0100. */
-function makeRom(program: number[], type = 0x00, ramSizeCode = 0x00): Uint8Array {
+function makeRom(program: number[], type = 0x00, ramSizeCode = 0x00, cgbFlag = 0x00): Uint8Array {
   const rom = new Uint8Array(0x8000);
   rom.set(program, 0x100);
   rom.set(
     [...'SAVES'].map((c) => c.charCodeAt(0)),
     0x134,
   );
+  rom[0x143] = cgbFlag;
   rom[0x147] = type;
   rom[0x149] = ramSizeCode;
   let checksum = 0;
@@ -301,5 +302,59 @@ describe('EmulatorClient activity', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('EmulatorClient models', () => {
+  /** The battery ROM, marked as working on both models. */
+  const dualRom = makeRom(
+    [0x3e, 0x0a, 0xea, 0x00, 0x00, 0x3e, 0x42, 0xea, 0x00, 0xa0, 0x18, 0xfe],
+    0x03,
+    0x02,
+    0x80,
+  );
+  const dualKey = romKey(dualRom.slice().buffer);
+
+  /** Saves to slot 3 and says which model the state came from. */
+  async function savedModel(client: EmulatorClient, store: MemoryStore) {
+    await client.saveState('3');
+    return GameBoy.stateModel(new Uint8Array((await store.getState(dualKey, '3'))!.data));
+  }
+
+  it('runs games that ask for color in color', async () => {
+    const store = new MemoryStore();
+    const client = new EmulatorClient({ store });
+    await load(client, batteryRom);
+    client.pause();
+    await client.saveState('3');
+    expect(GameBoy.stateModel(new Uint8Array((await store.getState(batteryKey, '3'))!.data))).toBe(
+      'dmg',
+    );
+
+    await load(client, dualRom);
+    client.pause();
+    expect(await savedModel(client, store)).toBe('cgb');
+    client.dispose();
+  });
+
+  it('carries on a state saved on the other model on that model, until a reset', async () => {
+    const store = new MemoryStore();
+    // Saved before dual-mode games ran in color.
+    const data = new GameBoy(dualRom).serialize().buffer as ArrayBuffer;
+    await store.putState(dualKey, { slot: 'auto', data, created: 1, thumbnail: null });
+    await store.putState(dualKey, { slot: '2', data, created: 1, thumbnail: null });
+    const client = new EmulatorClient({ store });
+    await load(client, dualRom);
+    expect(client.getSnapshot().notice).toBe('Resumed where you left off.');
+    client.pause();
+    expect(await savedModel(client, store)).toBe('dmg');
+
+    client.reset();
+    await settle();
+    expect(await savedModel(client, store)).toBe('cgb');
+    await client.loadState('2');
+    expect(client.getSnapshot().notice).toBe('Loaded slot 2.');
+    expect(await savedModel(client, store)).toBe('dmg');
+    client.dispose();
   });
 });

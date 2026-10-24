@@ -11,8 +11,11 @@ export interface Bus {
   write(addr: number, value: number): void;
   /** Advances every other component by one M-cycle (4 T-cycles). */
   tick(): void;
-  /** STOP was executed. */
-  stop(): void;
+  /**
+   * STOP was executed. Returns true if it switched a Game Boy Color's speed instead, after
+   * which the CPU carries on.
+   */
+  stop(): boolean;
 }
 
 /**
@@ -278,8 +281,7 @@ export class Cpu implements Stateful {
 
   stop(): void {
     this.fetch8();
-    this.stopped = true;
-    this.bus.stop();
+    if (!this.bus.stop()) this.stopped = true;
   }
 
   enableInterrupts(): void {

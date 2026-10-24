@@ -1,7 +1,10 @@
 import { Interrupt, type Interrupts } from './interrupts';
 import type { StateReader, StateWriter, Stateful } from './state';
 
-/** Counter bit (DIV bit 4) whose falling edge clocks the APU frame sequencer. */
+/**
+ * Counter bit (DIV bit 4) whose falling edge clocks the APU frame sequencer. In double speed
+ * it is the next bit up, so the sequencer keeps to 512 Hz.
+ */
 const DIV_APU_BIT = 1 << 12;
 
 /** Bit of the internal counter whose falling edge clocks TIMA, indexed by TAC & 3. */
@@ -21,10 +24,11 @@ export class Timer implements Stateful {
   /** M-cycles left before an overflowed TIMA is reloaded (A), and the reload cycle itself (B). */
   private overflowDelay = 0;
   private reloading = false;
+  private apuBit = DIV_APU_BIT;
 
   constructor(
     private readonly interrupts: Interrupts,
-    /** Called on each falling edge of DIV bit 4 (512 Hz). */
+    /** Called on each falling edge of DIV bit 4, or 5 in double speed (512 Hz). */
     private readonly clockApu: () => void = () => {},
   ) {}
 
@@ -40,7 +44,12 @@ export class Timer implements Stateful {
     const counter = this.counter;
     this.counter = (counter + 4) & 0xffff;
     if (before && !this.signal()) this.incrementTima();
-    if (counter & ~this.counter & DIV_APU_BIT) this.clockApu();
+    if (counter & ~this.counter & this.apuBit) this.clockApu();
+  }
+
+  /** A Game Boy Color's CPU speed, which the timer runs at. */
+  setDoubleSpeed(double: boolean): void {
+    this.apuBit = double ? DIV_APU_BIT << 1 : DIV_APU_BIT;
   }
 
   readDiv(): number {
@@ -52,7 +61,7 @@ export class Timer implements Stateful {
     const counter = this.counter;
     this.counter = 0;
     if (before) this.incrementTima();
-    if (counter & DIV_APU_BIT) this.clockApu();
+    if (counter & this.apuBit) this.clockApu();
   }
 
   writeTima(value: number): void {

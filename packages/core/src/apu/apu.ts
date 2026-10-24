@@ -214,10 +214,10 @@ export class Apu implements Stateful {
     }
   }
 
-  /** Advances one M-cycle (4 T-cycles). */
-  tick(): void {
-    this.pending += 4;
-    if ((this.untilSample -= 4) > 0) return;
+  /** Advances `cycles` T-cycles: an M-cycle's 4, or 2 for a double-speed one. */
+  tick(cycles = 4): void {
+    this.pending += cycles;
+    if ((this.untilSample -= cycles) > 0) return;
     this.untilSample += this.samplePeriod;
     this.sync();
     this.emitSample();

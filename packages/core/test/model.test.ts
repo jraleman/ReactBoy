@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { GameBoy, IO, UnsupportedCartridgeError } from '../src';
+import { GameBoy, IO, parseHeader, preferredModel, UnsupportedCartridgeError } from '../src';
 import { makeRom } from './helpers/rom-builder';
 
 const T0 = 1_700_000_000_000;
@@ -26,6 +26,11 @@ describe('models', () => {
     expect(new GameBoy(rom, { model: 'cgb' }).model).toBe('cgb');
     // Games that work on both run on either.
     expect(() => new GameBoy(makeRom(spin, { cgbFlag: 0x80 }))).not.toThrow();
+  });
+
+  it('prefers color mode for games whose header asks for it', () => {
+    const model = (cgbFlag: number) => preferredModel(parseHeader(makeRom(spin, { cgbFlag })));
+    expect([model(0x00), model(0x80), model(0xc0)]).toEqual(['dmg', 'cgb', 'cgb']);
   });
 });
 
@@ -128,17 +133,23 @@ describe('save states across models', () => {
     expect(b.serialize(T0)).toEqual(a.serialize(T0));
   });
 
-  it('refuses a state from the other model', () => {
+  it('refuses a state from the other model, which it can tell beforehand', () => {
     const cgb = new GameBoy(busy, { model: 'cgb' });
     const dmg = new GameBoy(busy);
     expect(() => dmg.deserialize(cgb.serialize())).toThrow(/from a Game Boy Color/);
     expect(() => cgb.deserialize(dmg.serialize())).toThrow(/from a Game Boy\./);
+    expect([GameBoy.stateModel(cgb.serialize()), GameBoy.stateModel(dmg.serialize())]).toEqual([
+      'cgb',
+      'dmg',
+    ]);
+    expect(() => GameBoy.stateModel(new Uint8Array(2))).toThrow('not a ReactBoy save state');
   });
 
   it('loads a version 2 state, saved before there were models, as a DMG', () => {
     // `busy` after 30 frames and a step, saved by ReactBoy before version 3.
     const v2 = gunzipSync(readFileSync(new URL('fixtures/busy-state-v2.bin.gz', import.meta.url)));
     expect(v2[4]).toBe(2);
+    expect(GameBoy.stateModel(v2)).toBe('dmg');
     expect(() => new GameBoy(busy, { model: 'cgb' }).deserialize(v2, T0)).toThrow(
       /from a Game Boy\./,
     );

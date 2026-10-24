@@ -124,6 +124,11 @@ export class StateReader {
     return this.pos === this.data.length;
   }
 
+  /** Bytes not yet read. */
+  get remaining(): number {
+    return this.data.length - this.pos;
+  }
+
   private need(n: number): void {
     if (this.pos + n > this.data.length) throw new SaveStateError('Save state is truncated.');
   }

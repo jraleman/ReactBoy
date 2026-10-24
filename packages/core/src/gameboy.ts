@@ -18,6 +18,7 @@ import type { Model } from './model';
 import type { ColorCorrection, Palette } from './ppu/palette';
 import { Ppu, PpuMode } from './ppu/ppu';
 import { Serial } from './serial';
+import { Speed } from './speed';
 import { SaveStateError, StateReader, StateWriter, type Stateful } from './state';
 import { Timer } from './timer';
 
@@ -30,6 +31,27 @@ const STATE_MAGIC = 0x54534252;
 export const STATE_VERSION = 3;
 /** Version 2 states are all DMG: version 3 added the model and Game Boy Color registers. */
 const OLDEST_STATE_VERSION = 2;
+/** CPU M-cycles a speed switch pauses for while the clock settles, with DIV held. */
+const SPEED_SWITCH_CYCLES = 2050;
+
+/** Reads the fields {@link GameBoy.serialize} writes before the wall-clock time. */
+function readStateHeader(r: StateReader): {
+  romChecksum: number;
+  headerChecksum: number;
+  model: Model;
+} {
+  if (r.remaining < 4 || r.u32() !== STATE_MAGIC) {
+    throw new SaveStateError('This is not a ReactBoy save state.');
+  }
+  r.version = r.u16();
+  if (r.version < OLDEST_STATE_VERSION || r.version > STATE_VERSION) {
+    throw new SaveStateError('This save state is from an incompatible version of ReactBoy.');
+  }
+  const romChecksum = r.u16();
+  const headerChecksum = r.u8();
+  const model = r.version >= 3 && r.u8() === 1 ? 'cgb' : 'dmg';
+  return { romChecksum, headerChecksum, model };
+}
 
 export interface GameBoyOptions {
   /** The DMG's four shades; a Game Boy Color ignores it. */
@@ -37,8 +59,7 @@ export interface GameBoyOptions {
   /** How a Game Boy Color's colors are shown; 'lcd' unless given. */
   colorCorrection?: ColorCorrection;
   /**
-   * The console to be; 'dmg' unless given. Color-only games need 'cgb'. Its banked memory,
-   * color graphics and VRAM DMA are emulated, but not yet double speed.
+   * The console to be; 'dmg' unless given. Color-only games need 'cgb'.
    */
   model?: Model;
 }
@@ -61,8 +82,10 @@ export class GameBoy implements Bus {
   readonly dma: OamDma;
   /** Game Boy Color VRAM DMA; idle on a DMG, which has no registers to start it. */
   readonly hdma: Hdma;
+  /** Game Boy Color CPU speed; always normal on a DMG. */
+  readonly speed: Speed;
   readonly mbc: Mbc;
-  /** Total T-cycles since power-on. */
+  /** Time since power-on, in T-cycles at normal speed (2 per M-cycle in double speed). */
   cycles = 0;
   /** Called after every CPU write while set; the debugger's watchpoints use it. */
   onWrite: ((addr: number, value: number) => void) | null = null;
@@ -74,6 +97,8 @@ export class GameBoy implements Bus {
   private idleCycles = 0;
   /** Set while {@link runHdma} ticks the machine, so its ticks don't start more copies. */
   private inHdma = false;
+  /** M-cycles left of a speed switch's pause, during which the timer is held. */
+  private speedSwitchHold = 0;
   /** {@link cycles} when activity was last taken. */
   private activitySince = 0;
   /** Everything a save state covers, in the order it is written. */
@@ -97,6 +122,7 @@ export class GameBoy implements Bus {
     this.timer = new Timer(this.interrupts, () => this.apu.clockFrameSequencer());
     this.joypad = new Joypad(this.interrupts);
     this.serial = new Serial(this.interrupts, () => this.timer.counter);
+    this.speed = new Speed(this.timer);
     this.mmu = new Mmu(
       {
         mbc: this.mbc,
@@ -106,6 +132,7 @@ export class GameBoy implements Bus {
         joypad: this.joypad,
         serial: this.serial,
         interrupts: this.interrupts,
+        speed: this.speed,
       },
       this.model === 'cgb',
     );
@@ -136,7 +163,7 @@ export class GameBoy implements Bus {
       this.joypad,
       this.serial,
       this.dma,
-      ...(this.model === 'cgb' ? [this.hdma] : []),
+      ...(this.model === 'cgb' ? [this.speed, this.hdma] : []),
       this.mmu,
       this.ppu,
       this.apu,
@@ -266,22 +293,24 @@ export class GameBoy implements Bus {
   }
 
   /**
+   * The model a state from {@link serialize} was saved on, so a machine of that model can be
+   * made to load it.
+   * @throws SaveStateError if the data isn't a state this version can load
+   */
+  static stateModel(data: Uint8Array): Model {
+    return readStateHeader(new StateReader(data)).model;
+  }
+
+  /**
    * Restores a state from {@link serialize}. On failure the machine is left as it was.
    * @throws SaveStateError if the data is damaged, from another game, model or version
    */
   deserialize(data: Uint8Array, wallMs = Date.now()): void {
     const r = new StateReader(data);
-    if (data.length < 4 || r.u32() !== STATE_MAGIC) {
-      throw new SaveStateError('This is not a ReactBoy save state.');
-    }
-    r.version = r.u16();
-    if (r.version < OLDEST_STATE_VERSION || r.version > STATE_VERSION) {
-      throw new SaveStateError('This save state is from an incompatible version of ReactBoy.');
-    }
-    if (r.u16() !== this.romChecksum || r.u8() !== this.header.headerChecksum) {
+    const { romChecksum, headerChecksum, model } = readStateHeader(r);
+    if (romChecksum !== this.romChecksum || headerChecksum !== this.header.headerChecksum) {
       throw new SaveStateError('This save state belongs to a different game.');
     }
-    const model: Model = r.version >= 3 && r.u8() === 1 ? 'cgb' : 'dmg';
     if (model !== this.model) {
       throw new SaveStateError(
         `This save state is from a ${model === 'cgb' ? 'Game Boy Color' : 'Game Boy'}.`,
@@ -322,27 +351,40 @@ export class GameBoy implements Bus {
 
   tick(): void {
     if (this.hdma.pending > 0 && !this.inHdma) this.runHdma();
-    this.cycles += 4;
+    // The PPU and APU keep normal-speed time, so a double-speed M-cycle is half as long.
+    const cycles = this.speed.double ? 2 : 4;
+    this.cycles += cycles;
     const { cpu } = this;
-    if (cpu.halted || cpu.stopped || cpu.locked) this.idleCycles += 4;
-    this.timer.tick();
-    this.apu.tick();
-    this.ppu.tick();
+    if (cpu.halted || cpu.stopped || cpu.locked) this.idleCycles += cycles;
+    if (this.speedSwitchHold === 0) this.timer.tick();
+    else this.speedSwitchHold--;
+    this.apu.tick(cycles);
+    this.ppu.tick(cycles);
     this.dma.tick();
     this.serial.tick();
   }
 
-  /** Copies VRAM DMA blocks while the CPU waits, 8 M-cycles for each 16 bytes. */
+  /**
+   * Copies VRAM DMA blocks while the CPU waits: 8 µs for each 16 bytes, which is 8 M-cycles,
+   * or 16 in double speed.
+   */
   private runHdma(): void {
     this.inHdma = true;
     while (this.hdma.pending > 0) {
       this.hdma.copyBlock();
-      for (let i = 0; i < 8; i++) this.tick();
+      const cycles = this.speed.double ? 16 : 8;
+      for (let i = 0; i < cycles; i++) this.tick();
     }
     this.inHdma = false;
   }
 
-  stop(): void {
+  /** STOP resets DIV. With KEY1 armed, it switches speed and pauses instead of stopping. */
+  stop(): boolean {
     this.timer.writeDiv();
+    if (!this.speed.armed) return false;
+    this.speed.toggle();
+    this.speedSwitchHold = SPEED_SWITCH_CYCLES;
+    while (this.speedSwitchHold > 0) this.tick();
+    return true;
   }
 }

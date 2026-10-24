@@ -206,10 +206,13 @@ export class Ppu implements Stateful {
     return (this.locks & OAM_WRITE) === 0;
   }
 
-  /** Advances one M-cycle (4 dots). */
-  tick(): void {
+  /**
+   * Advances `dots`: an M-cycle's 4, or 2 for a double-speed one. Lines are timed in
+   * multiples of 4 dots, which either step lands on.
+   */
+  tick(dots = 4): void {
     if (!this.lcdOn) return;
-    this.dot += 4;
+    this.dot += dots;
     if (this.dot === DOTS_PER_LINE) {
       this.dot = 0;
       this.startLine((this.line + 1) % LINES_PER_FRAME);

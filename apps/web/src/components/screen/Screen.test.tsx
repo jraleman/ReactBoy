@@ -45,7 +45,9 @@ describe('Screen boot', () => {
 
   it('rests on the boot logo with no game', () => {
     const { client, boot } = setup();
-    expect(screen.getByText('Drop a .gb file here, or choose Load ROM.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Drop a .gb or .gbc file here, or choose Load ROM.'),
+    ).toBeInTheDocument();
     expect(boot()).toBeNull();
     client.dispose();
   });
