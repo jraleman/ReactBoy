@@ -31,6 +31,8 @@ export const IO = {
   HDMA3: 0xff53,
   HDMA4: 0xff54,
   HDMA5: 0xff55,
+  /** Game Boy Color: infrared port. */
+  RP: 0xff56,
   /** Game Boy Color: background palette RAM index (BGPI in some docs). */
   BCPS: 0xff68,
   /** Game Boy Color: background palette RAM data at the BCPS index. */
@@ -43,5 +45,8 @@ export const IO = {
   OPRI: 0xff6c,
   /** Game Boy Color: the WRAM bank at 0xD000-0xDFFF. */
   SVBK: 0xff70,
+  /** Game Boy Color: the digital outputs of sound channels 1 and 2, and of 3 and 4. */
+  PCM12: 0xff76,
+  PCM34: 0xff77,
   IE: 0xffff,
 } as const;

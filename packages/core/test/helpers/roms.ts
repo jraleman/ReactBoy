@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
-import { CYCLES_PER_FRAME, GameBoy } from '../../src';
+import { CYCLES_PER_FRAME, GameBoy, type Model } from '../../src';
 
 const ROMS_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../../roms/test');
 
@@ -20,8 +20,8 @@ export function loadRom(path: string): Uint8Array {
  * Runs a Blargg-style ROM that reports over the serial port until it prints
  * "Passed"/"Failed" or the frame budget runs out. Returns everything it printed.
  */
-export function runSerialRom(rom: Uint8Array, maxFrames: number): string {
-  const gb = new GameBoy(rom);
+export function runSerialRom(rom: Uint8Array, maxFrames: number, model: Model = 'dmg'): string {
+  const gb = new GameBoy(rom, { model });
   let output = '';
   gb.serial.onByte = (byte) => {
     output += String.fromCharCode(byte);
@@ -33,6 +33,16 @@ export function runSerialRom(rom: Uint8Array, maxFrames: number): string {
   return output;
 }
 
+/** `rom` with its header asking for Game Boy Color mode, and the header checksum to match. */
+export function inColorMode(rom: Uint8Array): Uint8Array {
+  const patched = rom.slice();
+  patched[0x143] = 0x80;
+  let checksum = 0;
+  for (let addr = 0x134; addr <= 0x14c; addr++) checksum = (checksum - patched[addr]! - 1) & 0xff;
+  patched[0x14d] = checksum;
+  return patched;
+}
+
 /** B, C, D, E, H, L when a Mooneye test passes; a failure sets them all to 0x42. */
 const MOONEYE_PASS = [3, 5, 8, 13, 21, 34];
 
@@ -40,8 +50,12 @@ const MOONEYE_PASS = [3, 5, 8, 13, 21, 34];
  * Runs a Mooneye test until it reaches its `LD B,B` breakpoint. Returns null if it passed,
  * otherwise why not.
  */
-export function runMooneyeRom(rom: Uint8Array, maxFrames: number): string | null {
-  const gb = new GameBoy(rom);
+export function runMooneyeRom(
+  rom: Uint8Array,
+  maxFrames: number,
+  model: Model = 'dmg',
+): string | null {
+  const gb = new GameBoy(rom, { model });
   const budget = maxFrames * CYCLES_PER_FRAME;
   while (gb.peek(gb.cpu.pc) !== 0x40) {
     if (gb.cycles > budget || gb.cpu.locked) return gb.cpu.locked ? 'CPU locked up' : 'timed out';
@@ -60,8 +74,12 @@ const MEMORY_SIGNATURE = [0xde, 0xb0, 0x61];
  * Runs a Blargg-style ROM that reports in cartridge RAM rather than over serial: a status
  * byte at 0xA000 (0x80 while running, 0 for a pass) and text from 0xA004.
  */
-export function runMemoryRom(rom: Uint8Array, maxFrames: number): { status: number; text: string } {
-  const gb = new GameBoy(rom);
+export function runMemoryRom(
+  rom: Uint8Array,
+  maxFrames: number,
+  model: Model = 'dmg',
+): { status: number; text: string } {
+  const gb = new GameBoy(rom, { model });
   const ram = gb.mbc.ram;
   const done = () => MEMORY_SIGNATURE.every((b, i) => ram[1 + i] === b) && ram[0] !== 0x80;
   for (let frame = 0; frame < maxFrames && !done(); frame++) gb.runFrame();

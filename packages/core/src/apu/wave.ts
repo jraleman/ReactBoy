@@ -20,7 +20,8 @@ export class Wave extends Channel {
    */
   private readNow = false;
 
-  constructor() {
+  /** @param cgb a Game Boy Color, whose wave RAM is easier to reach while the channel plays */
+  constructor(private readonly cgb = false) {
     super(256);
   }
 
@@ -42,7 +43,7 @@ export class Wave extends Channel {
     return sum + cycles * this.level();
   }
 
-  private level(): number {
+  protected level(): number {
     return this.sample >> VOLUME_SHIFT[this.volumeCode]!;
   }
 
@@ -52,12 +53,12 @@ export class Wave extends Channel {
    */
   readRam(index: number): number {
     if (!this.enabled) return this.ram[index]!;
-    return this.readNow ? this.ram[this.position >> 1]! : 0xff;
+    return this.cgb || this.readNow ? this.ram[this.position >> 1]! : 0xff;
   }
 
   writeRam(index: number, value: number): void {
     if (!this.enabled) this.ram[index] = value;
-    else if (this.readNow) this.ram[this.position >> 1] = value;
+    else if (this.cgb || this.readNow) this.ram[this.position >> 1] = value;
   }
 
   /** Powering the APU on clears the sample buffer. */
@@ -65,8 +66,8 @@ export class Wave extends Channel {
     this.sample = 0;
   }
 
-  override powerOff(): void {
-    super.powerOff();
+  override powerOff(clearLength: boolean): void {
+    super.powerOff(clearLength);
     this.frequency = 0;
     this.volumeCode = 0;
   }
@@ -76,7 +77,7 @@ export class Wave extends Channel {
    * write) overwrites the start of wave RAM with that byte, or with its aligned 4 bytes.
    */
   override writeControl(value: number, lengthStepNext: boolean): void {
-    if (value & 0x80 && this.enabled && this.timer === 2) {
+    if (value & 0x80 && this.enabled && this.timer === 2 && !this.cgb) {
       const next = ((this.position + 1) >> 1) & 0x0f;
       if (next < 4) this.ram[0] = this.ram[next]!;
       else this.ram.copyWithin(0, next & ~3, (next & ~3) + 4);

@@ -244,11 +244,9 @@ export class Ppu implements Stateful {
       this.oamScanSignal = true;
       this.updateStatLine();
     } else if (line === SCREEN_HEIGHT) {
-      // On a DMG the mode 2 source also fires as VBlank starts, as if line 144 began an
-      // OAM scan.
-      this.oamScanSignal = true;
-      this.updateStatLine();
-      this.oamScanSignal = false;
+      // The mode 2 source also fires as VBlank starts, as if line 144 began an OAM scan; a
+      // Game Boy Color has already done it.
+      if (!this.cgb) this.pulseOamScanSignal();
       this.setMode(PpuMode.VBlank);
       this.interrupts.request(Interrupt.VBlank);
       this.presentFrame();
@@ -270,6 +268,9 @@ export class Ppu implements Stateful {
       this.oamScanSignal = false;
       this.setMode(PpuMode.Drawing);
       this.renderLine();
+    } else if (this.cgb && dot === DOTS_PER_LINE - 4 && this.line === SCREEN_HEIGHT - 1) {
+      // A Game Boy Color raises line 144's mode 2 STAT source an M-cycle before VBlank.
+      this.pulseOamScanSignal();
     } else if (this.mode === PpuMode.Drawing) {
       const end = DRAWING_END + this.drawingPenalty;
       if (!this.hblankSignal && dot >= end - HBLANK_IRQ_LEAD) {
@@ -304,6 +305,12 @@ export class Ppu implements Stateful {
         return;
     }
     this.updateStatLine();
+  }
+
+  private pulseOamScanSignal(): void {
+    this.oamScanSignal = true;
+    this.updateStatLine();
+    this.oamScanSignal = false;
   }
 
   private compareLy(): void {

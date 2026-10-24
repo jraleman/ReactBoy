@@ -42,12 +42,12 @@ export class Noise extends Channel {
     return sum + cycles * this.level();
   }
 
-  private level(): number {
+  protected level(): number {
     return this.lfsr & 1 ? 0 : this.envelope.volume;
   }
 
-  override powerOff(): void {
-    super.powerOff();
+  override powerOff(clearLength: boolean): void {
+    super.powerOff(clearLength);
     this.envelope.write(0);
     this.writePolynomial(0);
   }

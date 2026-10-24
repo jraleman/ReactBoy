@@ -33,8 +33,12 @@ export class Mmu implements Stateful {
   readonly hram = new Uint8Array(0x7f);
   /** Set by any write to cartridge RAM; cleared once battery RAM has been saved. */
   cartRamDirty = false;
-  /** WRAM bank at 0xD000-0xDFFF, 1-7. */
+  /** SVBK as written, 0-7. */
+  private svbk = 0;
+  /** WRAM bank at 0xD000-0xDFFF, 1-7: SVBK, except that 0 gives bank 1. */
   private wramBank = 1;
+  /** RP, the Game Boy Color's infrared port: read enable (bits 6-7) and LED (bit 0). */
+  private rp = 0;
   /** VRAM bank at 0x8000-0x9FFF, 0-1. */
   private vramBank = 0;
   /**
@@ -65,7 +69,7 @@ export class Mmu implements Stateful {
     if (addr < 0xfea0) {
       return d.ppu.oamReadable() && !this.dma.active ? d.ppu.oam[addr - 0xfe00]! : 0xff;
     }
-    if (addr < 0xff00) return 0xff;
+    if (addr < 0xff00) return this.readUnusable(addr);
     if (addr >= 0xff80 && addr < 0xffff) return this.hram[addr - 0xff80]!;
     return this.readIo(addr);
   }
@@ -115,16 +119,20 @@ export class Mmu implements Stateful {
   writeState(w: StateWriter): void {
     w.bytes(this.wram);
     w.bytes(this.hram);
-    w.u8(this.wramBank);
+    w.u8(this.svbk);
     w.u8(this.vramBank);
     w.bytes(this.spare);
+    if (this.cgb) w.u8(this.rp);
   }
 
   readState(r: StateReader): void {
     r.bytes(this.wram);
     r.bytes(this.hram);
-    this.wramBank = r.u8() & 7 || 1;
-    // Version 2 states predate the Game Boy Color's registers.
+    this.svbk = r.u8() & 7;
+    // Before version 4 this was the bank in use, where 1 most likely came from SVBK = 0.
+    if (r.version < 4 && this.svbk === 1) this.svbk = 0;
+    this.wramBank = this.svbk || 1;
+    // Version 2 states predate the Game Boy Color's registers, and version 3 the IR port.
     if (r.version < 3) {
       this.vramBank = 0;
       this.spare.fill(0);
@@ -132,6 +140,16 @@ export class Mmu implements Stateful {
       this.vramBank = r.u8() & 1;
       r.bytes(this.spare);
     }
+    this.rp = this.cgb && r.version >= 4 ? r.u8() & 0xc1 : 0;
+  }
+
+  /**
+   * 0xFEA0-0xFEFF. A Game Boy Color (revision E) repeats the high nibble of the address's low
+   * byte, e.g. 0xFEB3 reads 0xBB, unless the PPU is blocking OAM.
+   */
+  private readUnusable(addr: number): number {
+    if (!this.cgb || !this.devices.ppu.oamReadable()) return 0xff;
+    return ((addr >> 4) & 0x0f) * 0x11;
   }
 
   private vramOffset(addr: number): number {
@@ -209,9 +227,16 @@ export class Mmu implements Stateful {
         // Priority by OAM index, as the boot ROM sets it for color games; locked since.
         return 0xfe;
       case IO.SVBK:
-        return 0xf8 | this.wramBank;
+        return 0xf8 | this.svbk;
+      case IO.RP:
+        // Bit 1 low would mean an infrared signal is coming in; there never is one.
+        return 0x3e | this.rp;
       case 0xff75:
         return 0x8f | this.spare[3]!;
+      case IO.PCM12:
+        return apu.readPcm(0);
+      case IO.PCM34:
+        return apu.readPcm(1);
     }
     if (addr >= 0xff72 && addr < 0xff75) return this.spare[addr - 0xff72]!;
     return 0xff;
@@ -281,7 +306,10 @@ export class Mmu implements Stateful {
     else if (addr === IO.BCPS || addr === IO.OCPS) ppu.writePaletteIndex(addr === IO.OCPS, value);
     else if (addr === IO.BCPD || addr === IO.OCPD) ppu.writePaletteData(addr === IO.OCPD, value);
     // Bank 0 is always at 0xC000; asking for it at 0xD000 gives bank 1.
-    else if (addr === IO.SVBK) this.wramBank = value & 7 || 1;
+    else if (addr === IO.SVBK) {
+      this.svbk = value & 7;
+      this.wramBank = this.svbk || 1;
+    } else if (addr === IO.RP) this.rp = value & 0xc1;
     else if (addr === 0xff75) this.spare[3] = value & 0x70;
     else if (addr >= 0xff72 && addr < 0xff75) this.spare[addr - 0xff72] = value;
   }

@@ -22,6 +22,13 @@ export abstract class Channel implements Stateful {
   abstract advance(cycles: number): number;
   /** Channel-specific restart on trigger. */
   protected abstract restart(): void;
+  /** The digital output (0-15) right now, ignoring whether the channel is on. */
+  protected abstract level(): number;
+
+  /** The digital output (0-15) right now, as a Game Boy Color's PCM12 and PCM34 show it. */
+  output(): number {
+    return this.enabled ? this.level() : 0;
+  }
 
   writeLength(value: number): void {
     this.length = this.maxLength - value;
@@ -57,11 +64,15 @@ export abstract class Channel implements Stateful {
     if (this.lengthEnabled && this.length > 0 && --this.length === 0) this.enabled = false;
   }
 
-  /** Clears every register-driven setting. On a DMG the length counter survives power-off. */
-  powerOff(): void {
+  /**
+   * Clears every register-driven setting. On a DMG the length counter survives power-off;
+   * a Game Boy Color clears it too.
+   */
+  powerOff(clearLength: boolean): void {
     this.enabled = false;
     this.dacEnabled = false;
     this.lengthEnabled = false;
+    if (clearLength) this.length = 0;
   }
 
   writeState(w: StateWriter): void {

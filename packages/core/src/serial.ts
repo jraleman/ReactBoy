@@ -9,6 +9,8 @@ import type { StateReader, StateWriter, Stateful } from './state';
  * shift lands on the M-cycle before the counter, as the timer reports it, reaches the edge.
  */
 const CLOCK_BIT = 1 << 8;
+/** The Game Boy Color's fast internal clock (SC bit 1), 32 times quicker at 262144 Hz. */
+const FAST_CLOCK_BIT = 1 << 3;
 
 /**
  * How long a transfer on this side's clock waits for the partner's byte before giving up
@@ -34,7 +36,8 @@ export interface SerialLink {
  */
 export class Serial implements Stateful {
   data = 0;
-  control = 0x7e;
+  /** SC bits 7, 1 (Game Boy Color only) and 0. */
+  control = 0;
   onByte: ((byte: number) => void) | null = null;
   /** Transfers started, for {@link GameBoy.takeActivity}; not part of the saved state. */
   transfers = 0;
@@ -51,16 +54,22 @@ export class Serial implements Stateful {
     private readonly interrupts: Interrupts,
     /** The timer's internal counter, already advanced for the current M-cycle. */
     private readonly counter: () => number,
-  ) {}
+    /** A Game Boy Color, where SC bit 1 picks a fast internal clock. */
+    private readonly cgb = false,
+  ) {
+    // The color boot ROM leaves SC reading 0x7F.
+    if (cgb) this.control = 0x03;
+  }
 
   readControl(): number {
-    return this.control | 0x7e;
+    return this.control | (this.cgb ? 0x7c : 0x7e);
   }
 
   writeControl(value: number): void {
-    this.control = value & 0x81;
+    this.control = value & (this.cgb ? 0x83 : 0x81);
     if (value & 0x80) this.transfers++;
-    if (this.control === 0x81) {
+    const mode = this.control & 0x81;
+    if (mode === 0x81) {
       this.onByte?.(this.data);
       if (this.incoming !== null) {
         // The partner is already waiting on its own transfer: swap with that instead.
@@ -74,7 +83,7 @@ export class Serial implements Stateful {
         // Without a partner, only transfers on the internal clock progress.
         this.bitsLeft = 8;
       }
-    } else if (this.control === 0x80 && this.incoming !== null) {
+    } else if (mode === 0x80 && this.incoming !== null) {
       const byte = this.incoming;
       this.incoming = null;
       this.answer(byte);
@@ -87,7 +96,7 @@ export class Serial implements Stateful {
    * bytes), otherwise kept until it is.
    */
   receive(byte: number): void {
-    if (this.control === 0x80 || this.waitCycles > 0) this.answer(byte);
+    if ((this.control & 0x81) === 0x80 || this.waitCycles > 0) this.answer(byte);
     else this.incoming = byte;
   }
 
@@ -121,7 +130,8 @@ export class Serial implements Stateful {
     }
     if (this.bitsLeft === 0) return;
     const counter = this.counter();
-    if ((counter & CLOCK_BIT) === 0 || ((counter + 4) & CLOCK_BIT) !== 0) return;
+    const bit = this.control & 0x02 ? FAST_CLOCK_BIT : CLOCK_BIT;
+    if ((counter & bit) === 0 || ((counter + 4) & bit) !== 0) return;
     if (--this.bitsLeft === 0) this.finish(0xff);
   }
 
@@ -133,7 +143,7 @@ export class Serial implements Stateful {
 
   readState(r: StateReader): void {
     this.data = r.u8();
-    this.control = r.u8();
+    this.control = r.u8() & (this.cgb ? 0x83 : 0x81);
     this.bitsLeft = r.u8();
   }
 }

@@ -14,6 +14,9 @@ const CGB_ACID2 = 'https://github.com/mattcurrie/cgb-acid2';
 const MAGEN = 'https://github.com/alloncm/MagenTests/releases/download/0.5.0';
 const MOONEYE_BUILD = 'mts-20260714-0944-31510e1';
 const MOONEYE = `https://gekkio.fi/files/mooneye-test-suite/${MOONEYE_BUILD}/${MOONEYE_BUILD}.tar.gz`;
+/** Bump to re-extract the Mooneye archive when {@link MOONEYE_DIRS} changes. */
+const MOONEYE_SELECTION = 2;
+const MOONEYE_DIRS = /^(acceptance|misc|emulator-only\/mbc\d)\/.*\.gb$/;
 
 const blargg = [
   'cpu_instrs/individual/01-special.gb',
@@ -46,6 +49,20 @@ const blargg = [
     '11-regs after power',
     '12-wave write while on',
   ].map((name) => `dmg_sound/rom_singles/${name}.gb`),
+  ...[
+    '01-registers',
+    '02-len ctr',
+    '03-trigger',
+    '04-sweep',
+    '05-sweep details',
+    '06-overflow on trigger',
+    '07-len sweep period sync',
+    '08-len ctr during power',
+    '09-wave read while on',
+    '10-wave trigger while on',
+    '11-regs after power',
+    '12-wave',
+  ].map((name) => `cgb_sound/rom_singles/${name}.gb`),
 ];
 
 const files = [
@@ -74,16 +91,16 @@ for (const { url, dest } of files) {
   fetched++;
   console.log(`fetched ${dest}`);
 }
-// Mooneye only publishes whole-suite archives; keep the acceptance and MBC tests from one.
+// Mooneye only publishes whole-suite archives; keep the acceptance, misc and MBC tests.
 const mooneyeDir = join(root, 'mooneye');
-const mooneyeStamp = join(mooneyeDir, `${MOONEYE_BUILD}.stamp`);
+const mooneyeStamp = join(mooneyeDir, `${MOONEYE_BUILD}-${MOONEYE_SELECTION}.stamp`);
 if (!(await exists(mooneyeStamp))) {
   const res = await fetch(MOONEYE);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${MOONEYE}`);
   let count = 0;
   for (const { name, data } of readTar(gunzipSync(new Uint8Array(await res.arrayBuffer())))) {
     const path = name.slice(name.indexOf('/') + 1);
-    if (!/^(acceptance|emulator-only\/mbc\d)\/.*\.gb$/.test(path)) continue;
+    if (!MOONEYE_DIRS.test(path)) continue;
     const target = join(mooneyeDir, path);
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, data);

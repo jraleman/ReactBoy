@@ -65,3 +65,30 @@ describe('blargg dmg_sound', () => {
     });
   }
 });
+
+// cgb_sound is the same suite for a Game Boy Color, which differs around wave RAM and power.
+const CGB_SOUND = [
+  '01-registers',
+  '02-len ctr',
+  '03-trigger',
+  '04-sweep',
+  '05-sweep details',
+  '06-overflow on trigger',
+  '07-len sweep period sync',
+  '08-len ctr during power',
+  '09-wave read while on',
+  '10-wave trigger while on',
+  '11-regs after power',
+  '12-wave',
+].map((name) => `blargg/cgb_sound/rom_singles/${name}.gb`);
+
+describe('blargg cgb_sound', () => {
+  for (const rom of CGB_SOUND) {
+    const path = romPath(rom);
+    it.skipIf(!path)(rom.split('/').pop()!, () => {
+      const { status, text } = runMemoryRom(loadRom(path!), 60 * 30, 'cgb');
+      expect(text).toContain('Passed');
+      expect(status).toBe(0);
+    });
+  }
+});

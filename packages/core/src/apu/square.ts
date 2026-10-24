@@ -54,7 +54,7 @@ export class Square extends Channel {
     return sum + cycles * this.level();
   }
 
-  private level(): number {
+  protected level(): number {
     return (DUTY[this.duty]! >> this.step) & 1 ? this.envelope.volume : 0;
   }
 
@@ -86,8 +86,8 @@ export class Square extends Channel {
     this.step = 0;
   }
 
-  override powerOff(): void {
-    super.powerOff();
+  override powerOff(clearLength: boolean): void {
+    super.powerOff(clearLength);
     this.envelope.write(0);
     this.frequency = 0;
     this.duty = 0;

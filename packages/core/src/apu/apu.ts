@@ -59,7 +59,7 @@ const CAPACITOR_CHARGE = 0.999958;
 export class Apu implements Stateful {
   readonly square1 = new Square(true);
   readonly square2 = new Square(false);
-  readonly wave = new Wave();
+  readonly wave: Wave;
   readonly noise = new Noise();
   /** Bit n set = channel n+1 is heard (for muting channels individually). */
   channelMask = 0x0f;
@@ -86,7 +86,9 @@ export class Apu implements Stateful {
   private capacitorRight = 0;
   private charge = 0;
 
-  constructor() {
+  /** @param cgb a Game Boy Color, which differs in wave RAM access and powering off */
+  constructor(private readonly cgb = false) {
+    this.wave = new Wave(cgb);
     this.write(0xff26, 0x80);
     BOOT_VALUES.forEach((value, i) => this.write(0xff10 + i, value));
     // The boot sound has finished: channel 1 is still on, but its envelope reached 0.
@@ -99,6 +101,16 @@ export class Apu implements Stateful {
     const i = addr - 0xff10;
     if (i >= WAVE_RAM) return this.wave.readRam(i - WAVE_RAM);
     return this.readRegister(i);
+  }
+
+  /**
+   * PCM12 (0) or PCM34 (1) on a Game Boy Color: the digital outputs of channels 1 and 2, or 3
+   * and 4, in the low and high nibbles.
+   */
+  readPcm(pair: 0 | 1): number {
+    this.sync();
+    const [low, high] = pair === 0 ? [this.square1, this.square2] : [this.wave, this.noise];
+    return (high.output() << 4) | low.output();
   }
 
   /**
@@ -133,6 +145,7 @@ export class Apu implements Stateful {
     if (i > NR52) return;
     if (!this.powered) {
       // On a DMG the length counters stay writable while the APU is off.
+      if (this.cgb) return;
       if (i === NR11) this.square1.writeLength(value & 0x3f);
       else if (i === NR21) this.square2.writeLength(value & 0x3f);
       else if (i === NR31) this.wave.writeLength(value);
@@ -280,10 +293,10 @@ export class Apu implements Stateful {
       this.wave.resetSample();
     } else {
       this.regs.fill(0);
-      this.square1.powerOff();
-      this.square2.powerOff();
-      this.wave.powerOff();
-      this.noise.powerOff();
+      this.square1.powerOff(this.cgb);
+      this.square2.powerOff(this.cgb);
+      this.wave.powerOff(this.cgb);
+      this.noise.powerOff(this.cgb);
     }
   }
 

@@ -1,7 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { GameBoy, IO, parseHeader, preferredModel, UnsupportedCartridgeError } from '../src';
+import {
+  GameBoy,
+  IO,
+  parseHeader,
+  PpuMode,
+  preferredModel,
+  UnsupportedCartridgeError,
+} from '../src';
 import { makeRom } from './helpers/rom-builder';
 
 const T0 = 1_700_000_000_000;
@@ -64,8 +71,9 @@ describe('Game Boy Color banking', () => {
       expect(gb.read(0xf000)).toBe(bank * 0x10);
       expect(gb.read(0xc000)).toBe(0xc0);
     }
+    // SVBK reads back what was written.
     gb.write(IO.SVBK, 0);
-    expect(gb.read(IO.SVBK)).toBe(0xf9);
+    expect(gb.read(IO.SVBK)).toBe(0xf8);
     expect(gb.read(0xd000)).toBe(0x10);
   });
 
@@ -95,6 +103,71 @@ describe('Game Boy Color banking', () => {
   });
 });
 
+describe('Game Boy Color hardware', () => {
+  const colorGb = () => new GameBoy(makeRom(spin), { model: 'cgb' });
+
+  it('leaves its registers as the color boot ROM does', () => {
+    const cgb = colorGb();
+    const registers = [IO.SC, IO.DMA, IO.KEY1, IO.VBK, IO.HDMA5, IO.RP, IO.SVBK];
+    expect(registers.map((r) => cgb.read(r))).toEqual([0x7f, 0x00, 0x7e, 0xfe, 0xff, 0x3e, 0xf8]);
+    const dmg = new GameBoy(makeRom(spin));
+    expect(registers.map((r) => dmg.read(r))).toEqual([0x7e, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+  });
+
+  it('runs the serial port 32 times faster with SC bit 1', () => {
+    const transferTicks = (gb: GameBoy, control: number) => {
+      gb.write(IO.SC, control);
+      let ticks = 0;
+      for (; gb.read(IO.SC) & 0x80; ticks++) gb.tick();
+      return ticks;
+    };
+    // 8 bits at 4 M-cycles each, or at 128; the first bit waits for the clock's next edge.
+    const cgb = colorGb();
+    expect(transferTicks(cgb, 0x83)).toBeLessThanOrEqual(8 * 4);
+    expect(transferTicks(cgb, 0x81)).toBeGreaterThan(7 * 128);
+    expect(cgb.read(IO.SC)).toBe(0x7d);
+    // A DMG has no fast clock, and SC bit 1 reads 1.
+    const dmg = new GameBoy(makeRom(spin));
+    expect(transferTicks(dmg, 0x83)).toBeGreaterThan(7 * 128);
+    expect(dmg.read(IO.SC)).toBe(0x7f);
+  });
+
+  it('keeps the IR port bits that can be written, and never receives', () => {
+    const gb = colorGb();
+    gb.write(IO.RP, 0xff);
+    expect(gb.read(IO.RP)).toBe(0xff);
+    gb.write(IO.RP, 0xc0);
+    expect(gb.read(IO.RP)).toBe(0xfe);
+  });
+
+  it('shows the digital outputs of the sound channels in PCM12 and PCM34', () => {
+    const gb = colorGb();
+    expect([gb.read(IO.PCM12), gb.read(IO.PCM34)]).toEqual([0x00, 0x00]);
+    gb.write(0xff16, 0x80); // NR21: 50% duty
+    gb.write(0xff17, 0xf0); // NR22: volume 15
+    gb.write(0xff19, 0x87); // NR24: trigger
+    const seen = new Set<number>();
+    for (let i = 0; i < 2000; i++) {
+      gb.tick();
+      seen.add(gb.read(IO.PCM12));
+    }
+    expect([...seen].sort()).toEqual([0x00, 0xf0]);
+    expect(gb.read(IO.PCM34)).toBe(0x00);
+    expect(new GameBoy(makeRom(spin)).read(IO.PCM12)).toBe(0xff);
+  });
+
+  it('reads the high nibble twice from 0xFEA0-0xFEFF, unless OAM is blocked', () => {
+    const gb = colorGb();
+    gb.write(IO.LCDC, 0x00);
+    gb.write(0xfea0, 0x12);
+    expect([gb.read(0xfea0), gb.read(0xfeb3), gb.read(0xfeff)]).toEqual([0xaa, 0xbb, 0xff]);
+    gb.write(IO.LCDC, 0x91);
+    while (gb.ppu.mode !== PpuMode.OamScan) gb.tick();
+    expect(gb.read(0xfec0)).toBe(0xff);
+    expect(new GameBoy(makeRom(spin)).read(0xfec0)).toBe(0xff);
+  });
+});
+
 /** Mixes a WRAM counter, DIV and TIMA into WRAM and the scroll register, so frames differ. */
 const busy = makeRom([
   ...[0x3e, 0x91, 0xe0, 0x40], // LD A,0x91; LDH (LCDC),A
@@ -116,6 +189,7 @@ describe('save states across models', () => {
     a.write(IO.BCPD, 0x1f);
     a.write(IO.OCPS, 0x07);
     a.write(IO.OCPD, 0x42);
+    a.write(IO.RP, 0x41);
     a.write(IO.VBK, 1);
     a.write(0x8123, 0x77);
     a.write(IO.SVBK, 5);
@@ -124,7 +198,9 @@ describe('save states across models', () => {
     for (let i = 0; i < 5; i++) a.runFrame();
     const b = new GameBoy(busy, { model: 'cgb' });
     b.deserialize(a.serialize(T0), T0);
-    expect([b.read(IO.VBK), b.read(IO.SVBK), b.read(0xff73)]).toEqual([0xff, 0xfd, 0x99]);
+    expect([b.read(IO.VBK), b.read(IO.SVBK), b.read(0xff73), b.read(IO.RP)]).toEqual([
+      0xff, 0xfd, 0x99, 0x7f,
+    ]);
     expect([b.peek(0x8123), b.read(0xd456)]).toEqual([0x77, 0x88]);
     expect([b.read(IO.BCPS), b.ppu.bgPalettes[0], b.read(IO.OCPS), b.ppu.objPalettes[7]]).toEqual([
       0xc1, 0x1f, 0x47, 0x42,

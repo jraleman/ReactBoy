@@ -28,8 +28,11 @@ const STATE_MAGIC = 0x54534252;
  * Bump whenever any component's saved layout changes, and have its readState handle the
  * versions back to {@link OLDEST_STATE_VERSION}; older states are rejected.
  */
-export const STATE_VERSION = 3;
-/** Version 2 states are all DMG: version 3 added the model and Game Boy Color registers. */
+export const STATE_VERSION = 4;
+/**
+ * Version 2 states are all DMG: version 3 added the model and Game Boy Color registers, and
+ * version 4 the Game Boy Color's IR port.
+ */
 const OLDEST_STATE_VERSION = 2;
 /** CPU M-cycles a speed switch pauses for while the clock settles, with DIV held. */
 const SPEED_SWITCH_CYCLES = 2050;
@@ -118,10 +121,10 @@ export class GameBoy implements Bus {
     this.ppu = new Ppu(this.interrupts, this.model === 'cgb');
     if (options.palette) this.ppu.setPalette(options.palette);
     if (options.colorCorrection) this.ppu.setColorCorrection(options.colorCorrection);
-    this.apu = new Apu();
+    this.apu = new Apu(this.model === 'cgb');
     this.timer = new Timer(this.interrupts, () => this.apu.clockFrameSequencer());
     this.joypad = new Joypad(this.interrupts);
-    this.serial = new Serial(this.interrupts, () => this.timer.counter);
+    this.serial = new Serial(this.interrupts, () => this.timer.counter, this.model === 'cgb');
     this.speed = new Speed(this.timer);
     this.mmu = new Mmu(
       {
@@ -137,6 +140,8 @@ export class GameBoy implements Bus {
       this.model === 'cgb',
     );
     this.dma = new OamDma((addr) => this.mmu.read(addr), this.ppu.oam);
+    // The color boot ROM leaves the DMA register reading 0.
+    if (this.model === 'cgb') this.dma.register = 0;
     this.hdma = new Hdma(
       (addr) => {
         this.reads[addr >>> 13]!++;
