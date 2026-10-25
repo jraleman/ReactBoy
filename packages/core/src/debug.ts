@@ -2,6 +2,7 @@ import { CYCLES_PER_FRAME } from './constants';
 import { CB_OPCODES } from './cpu/cb-opcodes';
 import { OPCODES } from './cpu/opcodes';
 import type { GameBoy } from './gameboy';
+import type { Model } from './model';
 
 /**
  * Stops before the instruction at `addr`. In the switchable ROM area (0x4000-0x7FFF) a
@@ -56,6 +57,17 @@ export interface DebugSnapshot {
   frame: number;
   /** All 64 KiB as the CPU sees it, read without side effects (see {@link GameBoy.peek}). */
   memory: Uint8Array;
+  model: Model;
+  /** What a Game Boy Color has beyond {@link memory}; null on a DMG. */
+  color: ColorSnapshot | null;
+}
+
+export interface ColorSnapshot {
+  /** Both VRAM banks, whichever VBK maps in: bank 1 starts at 0x2000. */
+  vram: Uint8Array;
+  /** Palette RAM: 8 palettes of four little-endian 15-bit colors each. */
+  bgPalettes: Uint8Array;
+  objPalettes: Uint8Array;
 }
 
 const CALLS = new Set([0xcd, 0xc4, 0xcc, 0xd4, 0xdc]);
@@ -79,7 +91,7 @@ function mappedBank(gb: GameBoy): number {
 
 /** The machine as a debugger shows it; needs no {@link Debugger} attached. */
 export function snapshot(gb: GameBoy): DebugSnapshot {
-  const { cpu } = gb;
+  const { cpu, ppu } = gb;
   const memory = new Uint8Array(0x10000);
   for (let addr = 0; addr < memory.length; addr++) memory[addr] = gb.peek(addr);
   return {
@@ -93,8 +105,17 @@ export function snapshot(gb: GameBoy): DebugSnapshot {
     cpu: cpu.locked ? 'locked' : cpu.stopped ? 'stopped' : cpu.halted ? 'halted' : 'running',
     romBank: mappedBank(gb),
     cycles: gb.cycles,
-    frame: gb.ppu.frameCount,
+    frame: ppu.frameCount,
     memory,
+    model: gb.model,
+    color:
+      gb.model === 'cgb'
+        ? {
+            vram: ppu.vram.slice(),
+            bgPalettes: ppu.bgPalettes.slice(),
+            objPalettes: ppu.objPalettes.slice(),
+          }
+        : null,
   };
 }
 

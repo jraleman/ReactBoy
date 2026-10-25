@@ -1,19 +1,36 @@
 import { useEffect, useId, useRef, useState, type MouseEvent } from 'react';
-import { IO } from '@reactboy/core';
+import { IO, type DebugSnapshot } from '@reactboy/core';
 import panel from '../panel/Panel.module.css';
 import type { ViewProps } from './Debugger';
 import styles from './Debugger.module.css';
 import { hex2, hex4 } from './hex';
-import { colorsFor, drawTile, paint, tileAddress } from './vram';
+import { colorColorsFor, colorsFor, drawTile, paint, tileAddress, tileSource } from './vram';
 
 const SIZE = 256;
 const MAPS = [0x9800, 0x9c00] as const;
 
-/** A 256x256 tile map with the screen's viewport (and the window's) outlined. */
-export function MapView({ snapshot, palette }: ViewProps) {
+/** Entry `i` of the tile map at `map`: its tile index and attributes (always 0 on a DMG). */
+function mapEntry({ memory, color }: DebugSnapshot, map: number, i: number): [number, number] {
+  // VBK may have bank 1 mapped in, so a Game Boy Color's map is read from VRAM itself.
+  if (!color) return [memory[map + i]!, 0];
+  const at = map - 0x8000 + i;
+  return [color.vram[at]!, color.vram[0x2000 + at]!];
+}
+
+/** A Game Boy Color map attribute (from VRAM bank 1) in words. */
+function describeAttributes(attr: number): string {
+  const flags = [attr & 0x20 && 'X flip', attr & 0x40 && 'Y flip', attr & 0x80 && 'over sprites'];
+  return [`palette ${attr & 7}`, `bank ${(attr >> 3) & 1}`, ...flags].filter(Boolean).join(', ');
+}
+
+/**
+ * A 256x256 tile map with the screen's viewport (and the window's) outlined. On a Game Boy
+ * Color each tile also takes its palette, bank and flips from the attribute map in bank 1.
+ */
+export function MapView({ snapshot, palette, correction }: ViewProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const id = useId();
-  const { memory } = snapshot;
+  const { memory, color } = snapshot;
   const lcdc = memory[IO.LCDC]!;
   const bgMap = lcdc & 0x08 ? 0x9c00 : 0x9800;
   const windowMap = lcdc & 0x40 ? 0x9c00 : 0x9800;
@@ -23,14 +40,26 @@ export function MapView({ snapshot, palette }: ViewProps) {
   const map = chosen ?? bgMap;
 
   useEffect(() => {
-    const colors = colorsFor(palette, memory[IO.BGP]);
+    const dmgColors = colorsFor(palette, memory[IO.BGP]);
+    const palettes =
+      color && Array.from({ length: 8 }, (_, i) => colorColorsFor(color.bgPalettes, i, correction));
     const pixels = new Uint32Array(SIZE * SIZE);
     for (let i = 0; i < 1024; i++) {
-      const addr = tileAddress(lcdc, memory[map + i]!);
-      drawTile(pixels, SIZE, memory, addr, (i % 32) * 8, Math.floor(i / 32) * 8, colors);
+      const [tile, attr] = mapEntry(snapshot, map, i);
+      const [bytes, addr] = tileSource(snapshot, tileAddress(lcdc, tile), (attr >> 3) & 1);
+      drawTile(
+        pixels,
+        SIZE,
+        bytes,
+        addr,
+        (i % 32) * 8,
+        Math.floor(i / 32) * 8,
+        palettes?.[attr & 7] ?? dmgColors,
+        { flipX: (attr & 0x20) !== 0, flipY: (attr & 0x40) !== 0 },
+      );
     }
     paint(canvas.current, pixels);
-  }, [memory, palette, lcdc, map]);
+  }, [snapshot, color, memory, palette, correction, lcdc, map]);
 
   const pick = (event: MouseEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -44,7 +73,7 @@ export function MapView({ snapshot, palette }: ViewProps) {
   const wx = memory[IO.WX]! - 7;
   const wy = memory[IO.WY]!;
   const windowShown = (lcdc & 0x20) !== 0 && wx < 160 && wy < 144;
-  const tile = selected === null ? null : memory[map + selected]!;
+  const [tile, attr] = selected === null ? [null, 0] : mapEntry(snapshot, map, selected);
 
   return (
     <div className={styles.canvasView}>
@@ -125,12 +154,18 @@ export function MapView({ snapshot, palette }: ViewProps) {
               <dd className={styles.mono}>
                 ${hex4(map + selected)} → tile ${hex2(tile)} at ${hex4(tileAddress(lcdc, tile))}
               </dd>
+              {color && (
+                <>
+                  <dt>Attributes</dt>
+                  <dd>{describeAttributes(attr)}</dd>
+                </>
+              )}
             </>
           )}
         </dl>
         <p className={styles.small}>
           <span className={styles.keyViewport} /> Screen <span className={styles.keyWindow} />{' '}
-          Window. Colors go through BGP.
+          Window. {color ? 'Colors come from background palette RAM.' : 'Colors go through BGP.'}
         </p>
       </div>
     </div>

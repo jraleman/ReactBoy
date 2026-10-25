@@ -7,6 +7,7 @@ import {
   snapshot,
   type BreakReason,
   type BusActivity,
+  type ColorCorrection,
   type Model,
   type Palette,
 } from '@reactboy/core';
@@ -27,6 +28,7 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
   let rom: Uint8Array | null = null;
   let key = '';
   let palette: Palette = PALETTES.classic;
+  let correction: ColorCorrection = 'lcd';
   let sampleRate = 0;
   let channels = 0x0f;
   let framesSinceFlush = 0;
@@ -50,7 +52,7 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
   };
 
   const create = (image: Uint8Array, model: Model) => {
-    const next = new GameBoy(image, { palette, model });
+    const next = new GameBoy(image, { palette, colorCorrection: correction, model });
     next.apu.setSampleRate(sampleRate);
     next.apu.channelMask = channels;
     return next;
@@ -73,6 +75,7 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
 
   /** Swaps in `next` as the running machine. */
   const install = (next: GameBoy) => {
+    if (next.model !== gb?.model) post({ type: 'model', model: next.model });
     gb = next;
     cable.plug(gb.serial);
     attachDebugger();
@@ -140,7 +143,11 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
     const samples = gb.apu.takeSamples();
     const audio = samples.length > 0 ? (samples.slice().buffer as ArrayBuffer) : null;
     const transfer = audio ? [pixels, audio] : [pixels];
-    if (debugReport) transfer.push(debugReport.snapshot.memory.buffer as ArrayBuffer);
+    if (debugReport) {
+      const { memory, color } = debugReport.snapshot;
+      transfer.push(memory.buffer as ArrayBuffer);
+      if (color) transfer.push(color.vram.buffer as ArrayBuffer);
+    }
     post(
       {
         type: 'frame',
@@ -224,6 +231,10 @@ export function createEmulatorHost(post: Post<HostMessage>): (message: ClientMes
       case 'palette':
         palette = message.palette;
         gb?.setPalette(palette);
+        break;
+      case 'color-correction':
+        correction = message.correction;
+        gb?.setColorCorrection(correction);
         break;
       case 'audio':
         sampleRate = message.sampleRate;

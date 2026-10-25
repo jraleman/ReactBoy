@@ -1,4 +1,10 @@
-import { toAbgr, type Palette } from '@reactboy/core';
+import {
+  cgbColorTable,
+  toAbgr,
+  type ColorCorrection,
+  type DebugSnapshot,
+  type Palette,
+} from '@reactboy/core';
 
 /**
  * The four colors that 2-bit color ids map to, as RGBA words for a Uint32Array view of
@@ -11,6 +17,45 @@ export function colorsFor(palette: Palette, register = 0xe4, transparent = false
     colors[id] = transparent && id === 0 ? 0 : toAbgr(palette[(register >> (id * 2)) & 3]!);
   }
   return colors;
+}
+
+/**
+ * Palette `index` (0-7) of Game Boy Color palette RAM as RGBA words, as {@link colorsFor}
+ * gives them.
+ */
+export function colorColorsFor(
+  paletteRam: Uint8Array,
+  index: number,
+  correction: ColorCorrection,
+  transparent = false,
+): Uint32Array {
+  const table = cgbColorTable(correction);
+  const colors = new Uint32Array(4);
+  for (let id = 0; id < 4; id++) {
+    const at = index * 8 + id * 2;
+    const color = (paletteRam[at]! | (paletteRam[at + 1]! << 8)) & 0x7fff;
+    colors[id] = transparent && id === 0 ? 0 : table[color]!;
+  }
+  return colors;
+}
+
+/** An RGBA word as a CSS color. */
+export function cssColor(abgr: number): string {
+  const rgb = ((abgr & 0xff) << 16) | (abgr & 0xff00) | ((abgr >> 16) & 0xff);
+  return `#${rgb.toString(16).padStart(6, '0')}`;
+}
+
+/**
+ * Where to read the tile at `addr` (0x8000-0x97FF) in VRAM `bank` from, as drawTile's
+ * `memory` and `addr`. On a DMG, and in bank 0 of a DMG snapshot, that is the memory map.
+ */
+export function tileSource(
+  snapshot: DebugSnapshot,
+  addr: number,
+  bank = 0,
+): [memory: Uint8Array, addr: number] {
+  const vram = snapshot.color?.vram;
+  return vram ? [vram, addr - 0x8000 + bank * 0x2000] : [snapshot.memory, addr];
 }
 
 /** Address of tile `index` under LCDC bit 4: 0x8000 unsigned, or 0x9000 signed. */

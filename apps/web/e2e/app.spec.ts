@@ -39,6 +39,30 @@ test('renders dmg-acid2 exactly like the reference image', async ({ page }) => {
     .toBe(0);
 });
 
+test('runs cgb-acid2 in color, exactly like the reference image when vivid', async ({ page }) => {
+  const rom = testRom('cgb-acid2/cgb-acid2.gbc');
+  const reference = testRom('cgb-acid2/reference.png');
+  test.skip(!rom || !reference, 'run pnpm fetch-roms first');
+
+  await loadRom(page, rom!);
+  await expect(page.getByText(/^Game Boy Color, /)).toBeVisible();
+  // Color games choose their own colors, so the DMG shades give way to color correction.
+  await expect(page.getByRole('radio', { name: 'Greyscale' })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: 'Handheld' })).toBeChecked();
+  // The reference image scales each channel straight to 8 bits.
+  await page.getByRole('radio', { name: 'Vivid' }).check();
+
+  const expected = Array.from(decodePng(readTestFile(reference!)).pixels);
+  const rgb = (pixels: number[], i: number) =>
+    (pixels[i * 4]! << 16) | (pixels[i * 4 + 1]! << 8) | pixels[i * 4 + 2]!;
+  await expect
+    .poll(async () => {
+      const pixels = await screenPixels(page);
+      return expected.filter((color, i) => rgb(pixels, i) !== color).length;
+    })
+    .toBe(0);
+});
+
 test('keyboard, remapped keys and touch buttons reach the game', async ({ page }) => {
   await loadRom(page, { name: 'input.gb', buffer: INPUT_ROM });
   await expectScreenColor(page, LIGHT);

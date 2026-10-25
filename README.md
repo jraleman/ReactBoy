@@ -1,24 +1,26 @@
 # ReactBoy
 
-A Game Boy (DMG) emulator for the browser. The emulator core is plain TypeScript with no
-DOM or React dependencies. It runs in a Web Worker, and React draws the handheld around it.
+A Game Boy and Game Boy Color emulator for the browser. The emulator core is plain
+TypeScript with no DOM or React dependencies. It runs in a Web Worker, and React draws the
+handheld around it.
 
-**Play:** <https://jraleman.com/ReactBoy/>. Load your own `.gb` ROM. Files never leave your
-device.
+**Play:** <https://jraleman.com/ReactBoy/>. Load your own `.gb` or `.gbc` ROM. Files never
+leave your device.
 
 ## Status
 
-| Area                                              | State                                                              |
-| ------------------------------------------------- | ------------------------------------------------------------------ |
-| CPU (SM83), interrupts, HALT bug, timers, OAM DMA | Passes Blargg `cpu_instrs`, `instr_timing`, `mem_timing`           |
-| PPU (scanline renderer, window, sprites, STAT)    | Passes `dmg-acid2`                                                 |
-| Timing accuracy                                   | Passes all 66 Mooneye acceptance tests for DMG ABC                 |
-| Cartridges                                        | ROM only, MBC1 (and multicarts), MBC2, MBC3 (RTC), MBC5            |
-| Input                                             | Remappable keyboard and gamepads, multitouch buttons               |
-| Battery saves, save states                        | Kept on the device; `.sav` import/export; auto-resume              |
-| Sound (two pulse, wave, noise; AudioWorklet)      | Passes all 12 Blargg `dmg_sound` tests                             |
-| Debugger                                          | Banked breakpoints, R/W watchpoints, memory editing, `.sym` labels |
-| Offline and installable (PWA)                     | Updates only when you choose; opens `.gb` files                    |
+| Area                                                      | State                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------ |
+| CPU (SM83), interrupts, HALT bug, timers, OAM DMA         | Passes Blargg `cpu_instrs`, `instr_timing`, `mem_timing`           |
+| PPU (scanline renderer, window, sprites, STAT)            | Passes `dmg-acid2` and `cgb-acid2`                                 |
+| Timing accuracy                                           | Passes all 66 Mooneye acceptance tests for DMG ABC                 |
+| Cartridges                                                | ROM only, MBC1 (and multicarts), MBC2, MBC3 (RTC), MBC5            |
+| Input                                                     | Remappable keyboard and gamepads, multitouch buttons               |
+| Battery saves, save states                                | Kept on the device; `.sav` import/export; auto-resume              |
+| Game Boy Color: banking, palettes, VRAM DMA, double speed | Color games run in color, with LCD color correction                |
+| Sound (two pulse, wave, noise; AudioWorklet)              | Passes all Blargg `dmg_sound` and `cgb_sound` tests                |
+| Debugger                                                  | Banked breakpoints, R/W watchpoints, memory editing, `.sym` labels |
+| Offline and installable (PWA)                             | Updates only when you choose; opens `.gb` and `.gbc` files         |
 
 See [the design document](reactboy-design-doc.md) for the full roadmap.
 
@@ -92,7 +94,8 @@ while the PPU blocks them. Breakpoint checks only run while the debugger is open
 A service worker precaches the whole app, so after the first visit ReactBoy works offline
 and can be installed. When a new version is downloaded it waits: the player chooses when to
 update, and the running game is saved and reopened around the reload. The installed app
-opens `.gb` files from the operating system where the browser supports it (Chromium).
+opens `.gb` and `.gbc` files from the operating system where the browser supports it
+(Chromium).
 
 ## Testing
 

@@ -15,7 +15,7 @@ export default defineConfig({
         name: 'ReactBoy',
         short_name: 'ReactBoy',
         description:
-          'A Game Boy emulator that runs in your browser. Load your own ROMs; nothing leaves your device.',
+          'A Game Boy and Game Boy Color emulator that runs in your browser. Load your own ROMs; nothing leaves your device.',
         start_url: '.',
         scope: '.',
         display: 'standalone',

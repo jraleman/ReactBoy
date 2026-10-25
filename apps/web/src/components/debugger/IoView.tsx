@@ -1,18 +1,18 @@
 import type { ViewProps } from './Debugger';
 import styles from './Debugger.module.css';
 import { hex2, hex4 } from './hex';
-import { IO_GROUPS } from './io-registers';
+import { COLOR_GROUP, IO_GROUPS } from './io-registers';
 
 const css = (rgb: number) => `#${rgb.toString(16).padStart(6, '0')}`;
 
-/** Hardware registers with their bits spelled out, plus wave RAM. */
+/** Hardware registers with their bits spelled out (a Game Boy Color's too), plus wave RAM. */
 export function IoView({ snapshot, previous, palette }: ViewProps) {
   const { memory } = snapshot;
   const before = previous?.memory;
 
   return (
     <div className={styles.io}>
-      {IO_GROUPS.map((group) => (
+      {(snapshot.color ? [...IO_GROUPS, COLOR_GROUP] : IO_GROUPS).map((group) => (
         <table key={group.name} className={styles.table}>
           <caption className={styles.caption}>{group.name}</caption>
           <tbody>
@@ -27,7 +27,9 @@ export function IoView({ snapshot, previous, palette }: ViewProps) {
                   <td className={styles.mono}>{hex2(value)}</td>
                   <td className={styles.bits}>{value.toString(2).padStart(8, '0')}</td>
                   <td>
-                    {isPalette ? (
+                    {isPalette && snapshot.color ? (
+                      'Unused: color games use palette RAM'
+                    ) : isPalette ? (
                       <span className={styles.swatches} aria-label={paletteLabel(value)}>
                         {[0, 1, 2, 3].map((id) => (
                           <span

@@ -12,6 +12,7 @@ export {
   type MapperKind,
 } from './cartridge';
 export {
+  cgbColorTable,
   PALETTES,
   toAbgr,
   type ColorCorrection,
@@ -25,6 +26,7 @@ export {
   type Breakpoint,
   type Watchpoint,
   type BreakReason,
+  type ColorSnapshot,
   type CpuRunState,
   type DebugSnapshot,
   type StepMode,

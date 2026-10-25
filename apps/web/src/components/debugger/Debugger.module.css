@@ -601,6 +601,10 @@
   box-shadow: 0 0 0 1px var(--rule);
 }
 
+.tileFrame[data-banks] {
+  width: calc(256px * 1.5);
+}
+
 .tiles {
   width: 100%;
   cursor: crosshair;
@@ -651,6 +655,12 @@
 .pick {
   stroke: var(--focus);
   stroke-width: 2;
+}
+
+.bankRule {
+  stroke: var(--rule);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
 }
 
 .keyViewport,
@@ -713,6 +723,22 @@
 
 .sprite[data-tall] {
   height: 48px;
+}
+
+/* --- Palettes --------------------------------------------------------------------------- */
+
+.palettes {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.palettes .table th {
+  width: 32px;
+}
+
+.palettes .table td:nth-child(2) {
+  width: 180px;
 }
 
 /* --- I/O -------------------------------------------------------------------------------- */

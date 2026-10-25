@@ -8,7 +8,9 @@ import {
   type BusActivity,
   type ButtonId,
   type CartridgeHeader,
+  type ColorCorrection,
   type DebugSnapshot,
+  type Model,
   type Palette,
   type StepMode,
   type Watchpoint,
@@ -39,6 +41,8 @@ export interface AudioSettings {
 export interface EmulatorState {
   status: EmulatorStatus;
   header: CartridgeHeader | null;
+  /** The console the game runs on; null until one loads. */
+  model: Model | null;
   /** Why the last ROM failed to load, in words a player can act on. */
   error: string | null;
   speed: number;
@@ -204,6 +208,7 @@ export class EmulatorClient {
     this.state = {
       status: 'empty',
       header: null,
+      model: null,
       error: null,
       speed: 1,
       fps: 0,
@@ -485,6 +490,11 @@ export class EmulatorClient {
     this.redraw();
   }
 
+  setColorCorrection(correction: ColorCorrection): void {
+    this.send({ type: 'color-correction', correction });
+    this.redraw();
+  }
+
   setButton(source: InputSource, button: ButtonId, pressed: boolean): void {
     const bit = SOURCE_BITS[source];
     const before = this.held.get(button) ?? 0;
@@ -731,6 +741,9 @@ export class EmulatorClient {
 
   private receive(message: HostMessage): void {
     switch (message.type) {
+      case 'model':
+        this.update({ model: message.model });
+        break;
       case 'loaded': {
         // A reset reloads the same game; its symbols stay.
         const sameGame = message.key === this.state.gameId;

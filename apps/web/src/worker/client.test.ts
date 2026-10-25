@@ -324,7 +324,9 @@ describe('EmulatorClient models', () => {
   it('runs games that ask for color in color', async () => {
     const store = new MemoryStore();
     const client = new EmulatorClient({ store });
+    expect(client.getSnapshot().model).toBeNull();
     await load(client, batteryRom);
+    expect(client.getSnapshot().model).toBe('dmg');
     client.pause();
     await client.saveState('3');
     expect(GameBoy.stateModel(new Uint8Array((await store.getState(batteryKey, '3'))!.data))).toBe(
@@ -332,6 +334,7 @@ describe('EmulatorClient models', () => {
     );
 
     await load(client, dualRom);
+    expect(client.getSnapshot().model).toBe('cgb');
     client.pause();
     expect(await savedModel(client, store)).toBe('cgb');
     client.dispose();
@@ -349,11 +352,14 @@ describe('EmulatorClient models', () => {
     client.pause();
     expect(await savedModel(client, store)).toBe('dmg');
 
+    expect(client.getSnapshot().model).toBe('dmg');
     client.reset();
     await settle();
+    expect(client.getSnapshot().model).toBe('cgb');
     expect(await savedModel(client, store)).toBe('cgb');
     await client.loadState('2');
     expect(client.getSnapshot().notice).toBe('Loaded slot 2.');
+    expect(client.getSnapshot().model).toBe('dmg');
     expect(await savedModel(client, store)).toBe('dmg');
     client.dispose();
   });

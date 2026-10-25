@@ -1,12 +1,15 @@
 import { useCallback, useState } from 'react';
-import { PALETTES, type ButtonId, type PaletteName } from '@reactboy/core';
+import { PALETTES, type ButtonId, type ColorCorrection, type PaletteName } from '@reactboy/core';
 import { isShellTheme, type ShellTheme } from '../components/shell/themes';
 import { DEFAULT_KEYMAP, DEFAULT_PADMAP } from '../input/buttons';
 
 export type { ShellTheme };
 
 export interface Settings {
+  /** The DMG's shades. */
   palette: PaletteName;
+  /** How color games' colors are shown. */
+  colorCorrection: ColorCorrection;
   shell: ShellTheme;
   /** The LCD contrast wheel, 0-1; 0.5 shows the palette as it is. */
   contrast: number;
@@ -27,6 +30,7 @@ export interface Settings {
 const KEY = 'reactboy:settings';
 const DEFAULTS: Settings = {
   palette: 'classic',
+  colorCorrection: 'lcd',
   shell: 'grey',
   contrast: 0.5,
   speed: 1,
@@ -54,6 +58,9 @@ function load(): Settings {
     if (!isKeymap(settings.keymap)) settings.keymap = DEFAULTS.keymap;
     if (!isPadmap(settings.padmap)) settings.padmap = DEFAULTS.padmap;
     if (!(settings.palette in PALETTES)) settings.palette = DEFAULTS.palette;
+    if (settings.colorCorrection !== 'lcd' && settings.colorCorrection !== 'raw') {
+      settings.colorCorrection = DEFAULTS.colorCorrection;
+    }
     if (!isShellTheme(settings.shell)) settings.shell = DEFAULTS.shell;
     if (!(settings.contrast >= 0 && settings.contrast <= 1)) settings.contrast = DEFAULTS.contrast;
     return settings;

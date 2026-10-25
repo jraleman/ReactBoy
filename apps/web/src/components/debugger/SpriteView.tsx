@@ -1,15 +1,18 @@
 import { useEffect, useRef } from 'react';
-import { IO } from '@reactboy/core';
+import { IO, type DebugSnapshot } from '@reactboy/core';
 import type { ViewProps } from './Debugger';
 import styles from './Debugger.module.css';
 import { hex2 } from './hex';
-import { colorsFor, drawTile, paint } from './vram';
+import { colorColorsFor, colorsFor, drawTile, paint, tileSource } from './vram';
 
 const SPRITES = 40;
 
-/** The 40 entries of OAM, previewed with their palettes and flips. */
-export function SpriteView({ snapshot, palette }: ViewProps) {
-  const { memory } = snapshot;
+/**
+ * The 40 entries of OAM, previewed with their palettes and flips. On a Game Boy Color the
+ * attributes pick one of eight palettes and a VRAM bank instead of OBP0 or OBP1.
+ */
+export function SpriteView({ snapshot, palette, correction }: ViewProps) {
+  const { memory, color } = snapshot;
   const lcdc = memory[IO.LCDC]!;
   const height = lcdc & 0x04 ? 16 : 8;
 
@@ -40,6 +43,7 @@ export function SpriteView({ snapshot, palette }: ViewProps) {
             const attr = memory[base + 3]!;
             const visible = x > 0 && x < 168 && y + height > 16 && y < 160;
             const flags = [
+              color && attr & 0x08 && 'Bank 1',
               attr & 0x20 && 'X flip',
               attr & 0x40 && 'Y flip',
               attr & 0x80 && 'Behind BG',
@@ -51,17 +55,21 @@ export function SpriteView({ snapshot, palette }: ViewProps) {
                 <td>{i}</td>
                 <td>
                   <SpritePreview
-                    memory={memory}
+                    snapshot={snapshot}
                     tile={height === 16 ? tile & 0xfe : tile}
                     attr={attr}
                     height={height}
-                    colors={colorsFor(palette, memory[attr & 0x10 ? IO.OBP1 : IO.OBP0], true)}
+                    colors={
+                      color
+                        ? colorColorsFor(color.objPalettes, attr & 7, correction, true)
+                        : colorsFor(palette, memory[attr & 0x10 ? IO.OBP1 : IO.OBP0], true)
+                    }
                   />
                 </td>
                 <td>{x - 8}</td>
                 <td>{y - 16}</td>
                 <td className={styles.mono}>${hex2(tile)}</td>
-                <td>OBP{attr & 0x10 ? 1 : 0}</td>
+                <td>{color ? attr & 7 : `OBP${attr & 0x10 ? 1 : 0}`}</td>
                 <td>{flags || '—'}</td>
               </tr>
             );
@@ -73,24 +81,25 @@ export function SpriteView({ snapshot, palette }: ViewProps) {
 }
 
 interface PreviewProps {
-  memory: Uint8Array;
+  snapshot: DebugSnapshot;
   tile: number;
   attr: number;
   height: number;
   colors: Uint32Array;
 }
 
-function SpritePreview({ memory, tile, attr, height, colors }: PreviewProps) {
+function SpritePreview({ snapshot, tile, attr, height, colors }: PreviewProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const pixels = new Uint32Array(8 * height);
-    drawTile(pixels, 8, memory, 0x8000 + tile * 16, 0, 0, colors, {
+    const bank = snapshot.color ? (attr >> 3) & 1 : 0;
+    drawTile(pixels, 8, ...tileSource(snapshot, 0x8000 + tile * 16, bank), 0, 0, colors, {
       flipX: (attr & 0x20) !== 0,
       flipY: (attr & 0x40) !== 0,
       height,
     });
     paint(canvas.current, pixels);
-  }, [memory, tile, attr, height, colors]);
+  }, [snapshot, tile, attr, height, colors]);
   return (
     <canvas
       ref={canvas}

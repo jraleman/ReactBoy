@@ -5,7 +5,9 @@ import type {
   BusActivity,
   ButtonId,
   CartridgeHeader,
+  ColorCorrection,
   DebugSnapshot,
+  Model,
   Palette,
   StepMode,
   Watchpoint,
@@ -34,6 +36,7 @@ export type ClientMessage =
   | { type: 'reset'; battery?: ArrayBuffer }
   | { type: 'button'; button: ButtonId; pressed: boolean }
   | { type: 'palette'; palette: Palette }
+  | { type: 'color-correction'; correction: ColorCorrection }
   /** Produce sound at `sampleRate` Hz (0 = none) from the channels set in `channels`. */
   | { type: 'audio'; sampleRate: number; channels: number }
   /** Returns a framebuffer to the host's pool once it has been drawn. */
@@ -65,6 +68,11 @@ export interface DebugReport {
 
 /** Messages from the emulator host back to the UI thread. */
 export type HostMessage =
+  /**
+   * The machine is now this console: sent before `loaded`, and when restoring a state saved
+   * on the other one.
+   */
+  | { type: 'model'; model: Model }
   /** `resumed` is true when the game continues from the state it was loaded with. */
   | { type: 'loaded'; key: string; header: CartridgeHeader; resumed: boolean }
   /**

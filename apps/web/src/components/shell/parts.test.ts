@@ -22,6 +22,8 @@ const snapshot = (patch: Partial<DebugSnapshot> = {}): DebugSnapshot => ({
   cycles: 0,
   frame: 0,
   memory: new Uint8Array(0x10000),
+  model: 'dmg',
+  color: null,
   ...patch,
 });
 

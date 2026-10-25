@@ -140,3 +140,41 @@ export const IO_GROUPS: { name: string; registers: IoRegister[] }[] = [
     ],
   },
 ];
+
+/** The Game Boy Color's extra registers. */
+export const COLOR_GROUP: { name: string; registers: IoRegister[] } = {
+  name: 'Game Boy Color',
+  registers: [
+    {
+      addr: IO.KEY1,
+      name: 'KEY1',
+      describe: (v) => `${v & 0x80 ? 'Double' : 'Normal'} speed${v & 1 ? '; STOP switches' : ''}`,
+    },
+    { addr: IO.VBK, name: 'VBK', describe: (v) => `VRAM bank ${v & 1}` },
+    { addr: IO.SVBK, name: 'SVBK', describe: (v) => `WRAM bank ${v & 7 || 1} at $D000` },
+    {
+      addr: IO.HDMA5,
+      name: 'HDMA5',
+      describe: (v) => {
+        if (v === 0xff) return 'Idle';
+        const left = `${(v & 0x7f) + 1} blocks left`;
+        return v & 0x80 ? `Stopped, ${left}` : `Copying each HBlank, ${left}`;
+      },
+    },
+    ...[
+      { addr: IO.BCPS, name: 'BCPS' },
+      { addr: IO.OCPS, name: 'OCPS' },
+    ].map((register) => ({
+      ...register,
+      describe: (v: number) =>
+        `Palette ${(v >> 3) & 7} color ${(v >> 1) & 3}, ${v & 1 ? 'high' : 'low'} byte` +
+        (v & 0x80 ? '; steps after writes' : ''),
+    })),
+    {
+      addr: IO.RP,
+      name: 'RP',
+      describe: (v) =>
+        `Infrared light ${v & 1 ? 'on' : 'off'}, sensor ${(v & 0xc0) === 0xc0 ? 'on' : 'off'}`,
+    },
+  ],
+};

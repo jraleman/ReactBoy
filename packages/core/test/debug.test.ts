@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Debugger, GameBoy, PpuMode } from '../src';
+import { Debugger, GameBoy, IO, PpuMode, snapshot } from '../src';
 import { makeRom } from './helpers/rom-builder';
 
 /** Places code at absolute addresses from 0x0100. */
@@ -196,5 +196,21 @@ describe('Debugger', () => {
     expect(snapshot.memory[0xdffc]).toBe(0x06);
     expect(snapshot.memory[0xdffd]).toBe(0x01);
     expect(snapshot.memory[0x0110]).toBe(0x3c);
+    expect([snapshot.model, snapshot.color]).toEqual(['dmg', null]);
+  });
+
+  it('snapshots both VRAM banks and palette RAM on a Game Boy Color', () => {
+    const gb = new GameBoy(nested, { model: 'cgb' });
+    gb.write(IO.LCDC, 0x00);
+    gb.write(IO.VBK, 1);
+    gb.write(0x8000, 0x42);
+    gb.write(IO.BCPS, 0x82);
+    gb.write(IO.BCPD, 0x1f);
+    gb.write(IO.OCPS, 0x3f);
+    gb.write(IO.OCPD, 0x7c);
+    const { memory, model, color } = snapshot(gb);
+    expect(model).toBe('cgb');
+    expect([memory[0x8000], color!.vram[0], color!.vram[0x2000]]).toEqual([0x42, 0, 0x42]);
+    expect([color!.bgPalettes[2], color!.objPalettes[63]]).toEqual([0x1f, 0x7c]);
   });
 });

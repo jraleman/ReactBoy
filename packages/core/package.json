@@ -1,7 +1,7 @@
 {
   "name": "@reactboy/core",
   "version": "0.1.0",
-  "description": "Framework-agnostic Game Boy (DMG) emulator core",
+  "description": "Framework-agnostic Game Boy and Game Boy Color emulator core",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,

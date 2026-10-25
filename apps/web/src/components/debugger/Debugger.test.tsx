@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PALETTES } from '@reactboy/core';
 import { EmulatorContext } from '../../hooks/useEmulator';
@@ -7,9 +7,10 @@ import { EmulatorClient } from '../../worker/client';
 import Debugger from './Debugger';
 
 /** A valid ROM header around `program` at 0x0100. */
-function makeRom(program: number[]): Uint8Array {
+function makeRom(program: number[], cgbFlag = 0): Uint8Array {
   const rom = new Uint8Array(0x8000);
   rom.set(program, 0x100);
+  rom[0x143] = cgbFlag;
   let checksum = 0;
   for (let addr = 0x134; addr <= 0x14c; addr++) checksum = (checksum - rom[addr]! - 1) & 0xff;
   rom[0x14d] = checksum;
@@ -19,15 +20,15 @@ function makeRom(program: number[]): Uint8Array {
 /** loop: INC A; JR loop */
 const loopRom = makeRom([0x3c, 0x18, 0xfd]);
 
-async function setup() {
+async function setup(rom = loopRom) {
   const client = new EmulatorClient({ store: new MemoryStore() });
-  await client.loadRom(new Blob([loopRom.slice()]));
+  await client.loadRom(new Blob([rom.slice()]));
   await vi.waitFor(() => expect(client.getSnapshot().status).toBe('running'));
   client.pause();
   const onClose = vi.fn();
   render(
     <EmulatorContext.Provider value={client}>
-      <Debugger palette={PALETTES.classic} onClose={onClose} autoFocus />
+      <Debugger palette={PALETTES.classic} correction="lcd" onClose={onClose} autoFocus />
     </EmulatorContext.Provider>,
   );
   await screen.findByText(/^Paused at \$01/);
@@ -136,6 +137,33 @@ describe('Debugger', () => {
     goTo('FF44'); // LY is read-only
     set('FF44', '99');
     expect(await screen.findByText(/^Wrote \$99, but it reads/)).toBeInTheDocument();
+    client.dispose();
+  });
+
+  it('shows a color game’s palette RAM and registers, and only for color games', async () => {
+    const { client } = await setup(makeRom([0x3c, 0x18, 0xfd], 0x80));
+    const tabs = screen.getAllByRole('tab').map((tab) => tab.textContent);
+    expect(tabs).toEqual(['CPU', 'Memory', 'Tiles', 'Background', 'Sprites', 'Palettes', 'I/O']);
+    fireEvent.click(screen.getByRole('tab', { name: 'Palettes' }));
+    const background = screen.getByRole('table', { name: 'Background' });
+    // Palette RAM starts out white.
+    expect(within(background).getAllByRole('row')[0]).toHaveTextContent('07FFF 7FFF 7FFF 7FFF');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'I/O' }));
+    expect(screen.getByRole('table', { name: 'Game Boy Color' })).toHaveTextContent(
+      'WRAM bank 1 at $D000',
+    );
+    expect(screen.getAllByText('Unused: color games use palette RAM')).toHaveLength(3);
+    fireEvent.click(screen.getByRole('tab', { name: 'Tiles' }));
+    expect(screen.getByRole('img', { name: /banks 0 and 1$/ })).toBeInTheDocument();
+    client.dispose();
+  });
+
+  it('has no palette RAM to show for a DMG game', async () => {
+    const { client } = await setup();
+    expect(screen.queryByRole('tab', { name: 'Palettes' })).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'I/O' }));
+    expect(screen.queryByRole('table', { name: 'Game Boy Color' })).toBeNull();
     client.dispose();
   });
 });

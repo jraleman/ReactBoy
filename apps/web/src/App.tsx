@@ -24,7 +24,7 @@ const Debugger = lazy(() => import('./components/debugger/Debugger'));
 
 export function App() {
   const client = useEmulatorClient();
-  const { status, header, pressed, notice } = useEmulatorState();
+  const { status, header, model, pressed, notice } = useEmulatorState();
   const [settings, updateSettings] = useSettings();
   const scale = useDeviceScale();
   const wide = useMediaQuery(WIDE_QUERY);
@@ -33,13 +33,17 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   /** Where focus goes when the debugger opens or closes, so it isn't lost with the panel. */
   const [debuggerToggled, setDebuggerToggled] = useState(false);
-  const palette = PALETTES[settings.palette] ?? PALETTES.classic;
+  const dmgPalette = PALETTES[settings.palette] ?? PALETTES.classic;
+  // A color game paints its own colors; the screen around and behind them is white.
+  const palette = model === 'cgb' ? PALETTES.mono : dmgPalette;
   const view = usePartsView();
   const intro = useIntro();
 
   useKeyboard(client, settings.keymap);
   useShortcuts(client);
-  useEffect(() => client.setPalette(palette), [client, palette]);
+  useEffect(() => client.setPalette(dmgPalette), [client, dmgPalette]);
+  const { colorCorrection } = settings;
+  useEffect(() => client.setColorCorrection(colorCorrection), [client, colorCorrection]);
   useEffect(() => client.setSpeed(settings.speed), [client, settings.speed]);
   useEffect(() => client.setGamepadMap(settings.padmap), [client, settings.padmap]);
   const { volume, muted, channels } = settings;
@@ -114,6 +118,7 @@ export function App() {
           <Suspense fallback={<p className={styles.loading}>Loading the debugger…</p>}>
             <Debugger
               palette={palette}
+              correction={colorCorrection}
               autoFocus={debuggerToggled}
               onClose={() => {
                 setDebuggerToggled(true);

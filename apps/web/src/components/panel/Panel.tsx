@@ -1,5 +1,5 @@
 import { useId, useRef, type CSSProperties } from 'react';
-import { PALETTES, type PaletteName } from '@reactboy/core';
+import { PALETTES, type ColorCorrection, type PaletteName } from '@reactboy/core';
 import { useEmulatorClient, useEmulatorState } from '../../hooks/useEmulator';
 import type { Settings } from '../../hooks/useSettings';
 import { isClear, SHELLS } from '../shell/themes';
@@ -17,6 +17,10 @@ const PALETTE_NAMES: Record<PaletteName, string> = {
   mint: 'Mint',
   mono: 'Greyscale',
 };
+const CORRECTIONS: [ColorCorrection, string][] = [
+  ['lcd', 'Handheld'],
+  ['raw', 'Vivid'],
+];
 
 const kib = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${bytes / 1024 / 1024} MiB` : `${bytes / 1024} KiB`;
@@ -34,7 +38,7 @@ interface Props {
 
 export function Panel({ settings, onSettings, onLoad, onDebugger, onTour, focusDebugger }: Props) {
   const client = useEmulatorClient();
-  const { status, header, error, fps, notice, sound, link } = useEmulatorState();
+  const { status, header, model, error, fps, notice, sound, link } = useEmulatorState();
   const fileInput = useRef<HTMLInputElement>(null);
   const id = useId();
   const loaded = status === 'running' || status === 'paused';
@@ -47,12 +51,13 @@ export function Panel({ settings, onSettings, onLoad, onDebugger, onTour, focusD
         </h1>
         {header ? (
           <p className={styles.meta}>
+            {model === 'cgb' && 'Game Boy Color, '}
             {header.typeName}, {kib(header.romSize)} ROM
             {header.ramSize > 0 && `, ${kib(header.ramSize)} RAM`}
           </p>
         ) : (
           <p className={styles.meta}>
-            Load a Game Boy ROM (.gb) from your device to start playing.
+            Load a Game Boy or Game Boy Color ROM (.gb, .gbc) from your device to start playing.
           </p>
         )}
         {header && !header.headerChecksumValid && (
@@ -204,30 +209,53 @@ export function Panel({ settings, onSettings, onLoad, onDebugger, onTour, focusD
       <RecentGames />
 
       <section className={styles.section} aria-label="Appearance">
-        <fieldset className={styles.fieldset}>
-          <legend className={styles.legend}>Screen colors</legend>
-          <div className={styles.swatches}>
-            {(Object.keys(PALETTES) as PaletteName[]).map((name) => (
-              <label key={name} className={styles.swatch} title={PALETTE_NAMES[name]}>
-                <input
-                  type="radio"
-                  name={`${id}-palette`}
-                  checked={settings.palette === name}
-                  onChange={() => onSettings({ palette: name })}
-                />
-                <span className={styles.paletteChip} aria-hidden="true">
-                  {PALETTES[name].map((rgb) => (
-                    <span
-                      key={rgb}
-                      style={{ background: `#${rgb.toString(16).padStart(6, '0')}` }}
-                    />
-                  ))}
-                </span>
-                <span className="visually-hidden">{PALETTE_NAMES[name]}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        {model === 'cgb' ? (
+          <fieldset className={styles.fieldset}>
+            <legend className={styles.legend}>Screen colors</legend>
+            <div className={styles.segmented}>
+              {CORRECTIONS.map(([correction, name]) => (
+                <label key={correction} className={styles.segment}>
+                  <input
+                    type="radio"
+                    name={`${id}-correction`}
+                    checked={settings.colorCorrection === correction}
+                    onChange={() => onSettings({ colorCorrection: correction })}
+                  />
+                  <span>{name}</span>
+                </label>
+              ))}
+            </div>
+            <p className={styles.note}>
+              Color games choose their own colors. Handheld shows them as the Game Boy Color’s
+              screen did; Vivid at full strength.
+            </p>
+          </fieldset>
+        ) : (
+          <fieldset className={styles.fieldset}>
+            <legend className={styles.legend}>Screen colors</legend>
+            <div className={styles.swatches}>
+              {(Object.keys(PALETTES) as PaletteName[]).map((name) => (
+                <label key={name} className={styles.swatch} title={PALETTE_NAMES[name]}>
+                  <input
+                    type="radio"
+                    name={`${id}-palette`}
+                    checked={settings.palette === name}
+                    onChange={() => onSettings({ palette: name })}
+                  />
+                  <span className={styles.paletteChip} aria-hidden="true">
+                    {PALETTES[name].map((rgb) => (
+                      <span
+                        key={rgb}
+                        style={{ background: `#${rgb.toString(16).padStart(6, '0')}` }}
+                      />
+                    ))}
+                  </span>
+                  <span className="visually-hidden">{PALETTE_NAMES[name]}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
         <fieldset className={styles.fieldset}>
           <legend className={styles.legend}>Case color</legend>
           <div className={styles.swatches}>
